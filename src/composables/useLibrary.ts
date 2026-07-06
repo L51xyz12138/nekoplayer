@@ -1,7 +1,7 @@
 import { computed, reactive, toRefs } from 'vue'
 import { getEpisodes, getItems, setFavorite } from '@/api/emby'
 import { mapEmbyItem, mapEpisodes } from '@/api/mapper'
-import { useEmby } from './useEmby'
+import { useSources } from './useSources'
 import type { LibraryCategory, MediaItem, SortMode } from '@/types/media'
 
 interface LibraryState {
@@ -102,9 +102,9 @@ function toggleFavorite(id: string) {
   const m = getById(id)
   if (!m) return
   m.favorite = !m.favorite
-  const { session } = useEmby()
-  if (session.value) {
-    setFavorite(session.value, id, m.favorite).catch((e) =>
+  const s = useSources().sessionOf(m.sourceId)
+  if (s) {
+    setFavorite(s, id, m.favorite).catch((e) =>
       console.warn('[NekoPlayer] 收藏同步失败：', e)
     )
   }
@@ -136,17 +136,32 @@ function clearLibrary() {
 
 /** 从真实 Emby 拉取媒体库 */
 async function loadFromEmby() {
-  const { session } = useEmby()
-  const s = session.value
-  if (!s) return
+  const embySources = useSources().sources.value.filter(
+    (s) => s.kind === 'emby' && s.enabled && s.session
+  )
+  if (!embySources.length) {
+    state.items = []
+    state.loaded = false
+    return
+  }
 
   state.loading = true
   state.error = ''
   try {
-    const items = await getItems(s)
-    state.items = items.map((it) => mapEmbyItem(it, s))
+    // 并发拉取每个启用源，聚合为一个媒体库（单源失败不影响其它源）
+    const groups = await Promise.all(
+      embySources.map(async (src) => {
+        try {
+          const items = await getItems(src.session!)
+          return items.map((it) => mapEmbyItem(it, src.session!))
+        } catch (e) {
+          console.warn('[NekoPlayer] 媒体源加载失败：', src.name, e)
+          return [] as MediaItem[]
+        }
+      })
+    )
+    state.items = groups.flat()
     state.loaded = true
-    state.activeSourceId = 'all'
   } catch (e) {
     state.error = e instanceof Error ? e.message : '媒体库加载失败'
   } finally {
@@ -156,11 +171,10 @@ async function loadFromEmby() {
 
 /** 按需拉取某部剧集的季/集并填充 */
 async function loadSeasons(seriesId: string) {
-  const { session } = useEmby()
-  const s = session.value
-  if (!s) return
   const item = getById(seriesId)
   if (!item || item.type !== 'series' || item.seasons) return
+  const s = useSources().sessionOf(item.sourceId)
+  if (!s) return
   try {
     const episodes = await getEpisodes(s, seriesId)
     if (episodes.length) item.seasons = mapEpisodes(episodes, s)

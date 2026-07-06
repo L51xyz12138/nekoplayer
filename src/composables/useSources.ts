@@ -1,9 +1,24 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { EmbySession } from '@/api/emby'
 import type { MediaSource } from '@/types/source'
 
-// 模块级单例：媒体库首页与媒体源管理页共享同一份源列表
-const sources = ref<MediaSource[]>([])
+const SOURCES_KEY = 'neko-sources'
+
+function loadSources(): MediaSource[] {
+  try {
+    const raw = localStorage.getItem(SOURCES_KEY)
+    return raw ? (JSON.parse(raw) as MediaSource[]) : []
+  } catch {
+    return []
+  }
+}
+
+// 模块级单例：媒体源列表（含各自的 Emby 会话），持久化到 localStorage
+const sources = ref<MediaSource[]>(loadSources())
+
+watch(sources, () => localStorage.setItem(SOURCES_KEY, JSON.stringify(sources.value)), {
+  deep: true
+})
 
 const enabledSources = computed(() => sources.value.filter((s) => s.enabled))
 
@@ -22,6 +37,11 @@ function removeSource(id: string) {
 }
 function getSource(id: string) {
   return sources.value.find((x) => x.id === id)
+}
+
+/** 按媒体的 sourceId 取对应源的会话（拉库/播放/收藏鉴权用） */
+function sessionOf(sourceId: string): EmbySession | undefined {
+  return sources.value.find((s) => s.id === sourceId)?.session
 }
 
 function hostOf(url: string): string {
@@ -58,6 +78,7 @@ export function useSources() {
     toggleSource,
     removeSource,
     getSource,
+    sessionOf,
     upsertEmbySource
   }
 }

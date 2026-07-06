@@ -6,22 +6,21 @@ import SourceList from '@/components/source/SourceList.vue'
 import AddSourceDialog from '@/components/source/AddSourceDialog.vue'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
-import { useEmby } from '@/composables/useEmby'
 import type { MediaSource } from '@/types/source'
 
 const router = useRouter()
-const { sources, addSource, updateSource, toggleSource, removeSource, getSource } = useSources()
-const { setActiveSource, clearLibrary } = useLibrary()
-const { logout } = useEmby()
+const { sources, addSource, updateSource, toggleSource, removeSource } = useSources()
+const { setActiveSource, loadFromEmby } = useLibrary()
 
-// 删除媒体源：若是 Emby 源，同时登出并清空媒体库
+// 删除媒体源后重新聚合剩余源
 function remove(id: string) {
-  const src = getSource(id)
   removeSource(id)
-  if (src?.kind === 'emby') {
-    logout()
-    clearLibrary()
-  }
+  loadFromEmby()
+}
+// 启用 / 停用源后刷新媒体库
+function toggle(id: string) {
+  toggleSource(id)
+  loadFromEmby()
 }
 
 const dialogOpen = ref(false)
@@ -62,7 +61,7 @@ function browse(source: MediaSource) {
       <SourceList
         v-if="sources.length"
         :sources="sources"
-        @toggle="toggleSource"
+        @toggle="toggle"
         @remove="remove"
         @edit="openEdit"
         @browse="browse"

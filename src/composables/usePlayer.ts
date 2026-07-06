@@ -6,7 +6,7 @@ import {
   reportPlaybackStopped,
   resolvePlaybackUrl
 } from '@/api/emby'
-import { useEmby } from './useEmby'
+import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import type { Episode, MediaItem } from '@/types/media'
 
@@ -132,19 +132,19 @@ async function loadStream(item: MediaItem, episode?: Episode) {
   state.live = false
   state.error = ''
 
-  const { session } = useEmby()
-  if (!session.value) {
-    startTimer() // 演示数据：模拟播放
+  const s = useSources().sessionOf(item.sourceId)
+  if (!s) {
+    startTimer() // 无会话：模拟播放
     return
   }
 
   const targetId = episode?.id ?? item.id
   state.buffering = true
   try {
-    const { source, playSessionId } = await getPlaybackInfo(session.value, targetId)
+    const { source, playSessionId } = await getPlaybackInfo(s, targetId)
     if (!source) throw new Error('没有可用的播放源')
     state.playSessionId = playSessionId
-    const { url, type } = resolvePlaybackUrl(source, session.value)
+    const { url, type } = resolvePlaybackUrl(source, s)
     state.streamUrl = url
     state.streamType = type
     state.live = true
@@ -201,9 +201,8 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
       }
     }
   ).nekoNative
-  const { session } = useEmby()
-  if (!native?.playMpv || !session.value) return
-  const s = session.value
+  const s = useSources().sessionOf(item.sourceId)
+  if (!native?.playMpv || !s) return
   const { settings } = useSettings()
   const targetId = episode?.id ?? item.id
   const label = episode ? `${item.title} · S${episode.season}E${episode.episode}` : item.title
@@ -245,11 +244,12 @@ function togglePlay() {
 }
 
 function reportProgressToServer() {
-  const { session } = useEmby()
-  if (!state.live || !session.value || !state.current) return
+  if (!state.live || !state.current) return
+  const s = useSources().sessionOf(state.current.sourceId)
+  if (!s) return
   const itemId = state.episode?.id ?? state.current.id
   const positionTicks = Math.round(state.currentTime * 10_000_000)
-  reportPlaybackStopped(session.value, itemId, positionTicks, state.playSessionId).catch((e) =>
+  reportPlaybackStopped(s, itemId, positionTicks, state.playSessionId).catch((e) =>
     console.warn('[NekoPlayer] 进度同步失败：', e)
   )
 }

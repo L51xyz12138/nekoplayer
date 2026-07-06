@@ -2,24 +2,17 @@
 import { onMounted } from 'vue'
 import SideBar from '@/components/layout/SideBar.vue'
 import PlayerOverlay from '@/components/player/PlayerOverlay.vue'
-import { useEmby } from '@/composables/useEmby'
 import { useLibrary } from '@/composables/useLibrary'
-import { useSources } from '@/composables/useSources'
 import { useSettings } from '@/composables/useSettings'
 
-const emby = useEmby()
 const { loadFromEmby } = useLibrary()
-const { upsertEmbySource } = useSources()
 
 // 初始化并应用已保存的设置（主题色等）
 useSettings()
 
-// 启动：若已有 Emby 会话，反映到媒体源栏并拉库
+// 启动：从持久化的媒体源聚合加载媒体库
 onMounted(() => {
-  if (emby.isConnected.value && emby.session.value) {
-    upsertEmbySource(emby.session.value)
-    loadFromEmby()
-  }
+  loadFromEmby()
 })
 </script>
 

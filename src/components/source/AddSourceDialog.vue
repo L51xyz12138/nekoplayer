@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { X, Server } from 'lucide-vue-next'
+import { X, Server, Eye, EyeOff } from 'lucide-vue-next'
 import { sourceKinds, sourceKindMeta } from '@/data/mockSources'
 import { useEmby } from '@/composables/useEmby'
 import { useSources } from '@/composables/useSources'
@@ -25,6 +25,12 @@ const name = ref('')
 const form = reactive<Record<string, string>>({})
 const submitting = ref(false)
 const connectError = ref('')
+const showPwd = ref(false)
+
+// 按 Esc 关闭弹窗（不响应点击背景，避免误关）
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') emit('close')
+}
 
 const meta = computed(() => sourceKindMeta(kind.value))
 
@@ -57,12 +63,15 @@ function fillFromSource(src: MediaSource) {
 watch(
   () => props.open,
   (o) => {
-    if (!o) return
-    if (props.editing) {
-      fillFromSource(props.editing)
+    if (o) {
+      document.addEventListener('keydown', onKeydown)
+      if (props.editing) fillFromSource(props.editing)
+      else {
+        kind.value = 'emby'
+        resetForm()
+      }
     } else {
-      kind.value = 'emby'
-      resetForm()
+      document.removeEventListener('keydown', onKeydown)
     }
   }
 )
@@ -98,7 +107,7 @@ async function submit() {
 
 <template>
   <transition name="dialog">
-    <div v-if="open" class="mask" @click.self="emit('close')">
+    <div v-if="open" class="mask">
       <div class="dialog">
         <header class="dialog__head">
           <h2>{{ isEdit ? '编辑媒体源' : '添加媒体源' }}</h2>
@@ -146,9 +155,21 @@ async function submit() {
                 {{ f.label }}
                 <i v-if="f.required" class="req">*</i>
               </span>
+              <div v-if="f.type === 'password'" class="field__pwd">
+                <input
+                  v-model="form[f.key]"
+                  :type="showPwd ? 'text' : 'password'"
+                  :placeholder="f.placeholder"
+                />
+                <button type="button" class="field__eye" @click="showPwd = !showPwd">
+                  <EyeOff v-if="showPwd" :size="16" />
+                  <Eye v-else :size="16" />
+                </button>
+              </div>
               <input
+                v-else
                 v-model="form[f.key]"
-                :type="f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'"
+                :type="f.type === 'number' ? 'number' : 'text'"
                 :placeholder="f.placeholder"
               />
             </label>
@@ -328,6 +349,28 @@ async function submit() {
 }
 .field input:focus {
   border-color: var(--accent);
+}
+.field__pwd {
+  position: relative;
+}
+.field__pwd input {
+  padding-right: 46px;
+}
+.field__eye {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  color: var(--text-mute);
+  transition: color var(--dur) var(--ease);
+}
+.field__eye:hover {
+  color: var(--text);
 }
 
 .dialog__foot {

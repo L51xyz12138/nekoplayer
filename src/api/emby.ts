@@ -3,7 +3,7 @@
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
-const APP_VERSION = '0.1.0'
+const APP_VERSION = '0.1.1'
 
 function getDeviceId(): string {
   const KEY = 'neko-device-id'
@@ -198,49 +198,42 @@ export function imageUrl(
   return `${serverUrl}/Items/${itemId}/Images/${type}?${q}`
 }
 
-// mpv 支持一切格式：声明后 Emby 会 DirectPlay 原始文件（不转码）
-const MPV_DEVICE_PROFILE = {
-  MaxStreamingBitrate: 2_000_000_000,
-  DirectPlayProfiles: [{ Type: 'Video' }, { Type: 'Audio' }],
-  TranscodingProfiles: [],
-  ContainerProfiles: [],
-  CodecProfiles: [],
-  SubtitleProfiles: [
-    { Format: 'srt', Method: 'External' },
-    { Format: 'ass', Method: 'External' },
-    { Format: 'ssa', Method: 'External' },
-    { Format: 'vtt', Method: 'External' }
-  ]
-}
-
 /**
- * 为 mpv 走正常 PlaybackInfo 流程拿到 DirectPlay 地址。
- * 关键：带 PlaySessionId，Emby 才会正常建立会话（记录活动、不异常占用 CPU）。
+ * 为外部播放器（mpv/IINA/VLC 等）取原始文件的直连地址。
+ * 用「条目详情」拿正确的 MediaSourceId（比 PlaybackInfo 兼容更多魔改/网盘挂载服务器）。
  */
 export async function getMpvPlayback(
   session: EmbySession,
   itemId: string
 ): Promise<{ url: string; playSessionId: string }> {
-  const res = await request(session.serverUrl, `/Items/${itemId}/PlaybackInfo?UserId=${session.userId}`, session.token, {
-    method: 'POST',
-    body: JSON.stringify({ DeviceProfile: MPV_DEVICE_PROFILE })
-  })
+  // 直接取条目详情（带 MediaSources 字段）拿正确的媒体源 Id——
+  // 部分魔改/网盘挂载服务器的 PlaybackInfo 返回空 MediaSources，条目详情却带得到
+  const res = await request(
+    session.serverUrl,
+    `/Users/${session.userId}/Items/${itemId}?Fields=MediaSources,Path`,
+    session.token
+  )
   const data = await res.json()
   const source = data.MediaSources?.[0] as EmbyPlaybackSource | undefined
-  const playSessionId: string = data.PlaySessionId ?? ''
+  const playSessionId = ''
   const sourceId: string = source?.Id ?? itemId
 
   let url: string
   if (source?.DirectStreamUrl) {
-    url = `${session.serverUrl}${source.DirectStreamUrl}`
+    // Emby 给的直连地址（mpv 靠它直接播原文件）；若缺 api_key 就补上，供外部播放器认证
+    let ds = source.DirectStreamUrl
+    if (!/[?&]api_key=/i.test(ds)) {
+      ds += (ds.includes('?') ? '&' : '?') + 'api_key=' + session.token
+    }
+    url = `${session.serverUrl}${ds}`
   } else {
+    const container = source?.Container || 'mkv'
     const q = new URLSearchParams({
       Static: 'true',
       MediaSourceId: sourceId,
-      PlaySessionId: playSessionId,
       api_key: session.token
     })
-    url = `${session.serverUrl}/Videos/${sourceId}/stream?${q}`
+    url = `${session.serverUrl}/Videos/${itemId}/stream.${container}?${q}`
   }
   return { url, playSessionId }
 }

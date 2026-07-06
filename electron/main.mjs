@@ -91,14 +91,21 @@ ipcMain.handle('play-mpv', (_e, payload) => {
 
   const mpv = resolveMpv(mpvPath)
   try {
-    mpvProc = spawn(mpv, [target, ...args], { stdio: 'ignore' })
-    mpvProc.on('error', (err) => console.error('[mpv] 启动失败：', err.message))
-    mpvProc.on('exit', () => {
-      mpvProc = null
+    const proc = spawn(mpv, [target, ...args], { stdio: 'ignore', detached: true })
+    proc.unref()
+    mpvProc = proc
+    // 仅当退出的确实是当前进程时才清空引用，避免旧进程的 exit 回调误清掉新进程
+    proc.on('error', (err) => {
+      console.error('[mpv] 启动失败：', err.message)
+      if (mpvProc === proc) mpvProc = null
+    })
+    proc.on('exit', () => {
+      if (mpvProc === proc) mpvProc = null
     })
     return true
   } catch (err) {
     console.error('[mpv] spawn 异常：', err)
+    mpvProc = null
     return false
   }
 })

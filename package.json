@@ -1,6 +1,6 @@
 {
   "name": "nekoplayer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Infuse 风格的跨平台媒体播放器",
