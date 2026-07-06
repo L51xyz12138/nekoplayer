@@ -63,12 +63,19 @@ jobs:
 
       - name: Bundle mpv (macOS)
         if: matrix.platform == 'mac'
-        continue-on-error: true
         run: |
-          # macOS 需自包含的 mpv.app（stolendata build）；若源失效，mac 用户可改用 IINA
-          curl -fL -o mpv.tar.gz "https://laboratory.stolendata.net/~djinn/mpv_osx/mpv-latest-x86_64.tar.gz"
+          # 从官方 mpv release 下载自包含的 macOS arm64 build（内含 mpv.app）
+          URL=$(curl -fsSL "https://api.github.com/repos/mpv-player/mpv/releases/latest" | grep -o 'https://[^"]*macos-14-arm\.zip' | head -1)
+          echo "mpv download url: $URL"
+          curl -fL -o mpv-macos.zip "$URL"
+          unzip -q mpv-macos.zip -d mpv-tmp
+          APP=$(find mpv-tmp -maxdepth 2 -name '*.app' | head -1)
+          echo "extracted app: $APP"
           mkdir -p electron/mpv
-          tar -xzf mpv.tar.gz -C electron/mpv
+          cp -R "$APP" electron/mpv/mpv.app
+          # ad-hoc 重签，确保 arm64 上能执行
+          codesign --force --deep --sign - electron/mpv/mpv.app
+          ls -la electron/mpv/mpv.app/Contents/MacOS
 
       - name: Build & package
         run: npm run dist:${{ matrix.platform }}
