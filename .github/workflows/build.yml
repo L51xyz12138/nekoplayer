@@ -66,15 +66,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 用 gh（带 token 认证，避免 API 限流 403）从官方 release 下载自包含 mpv.app
+          # 用 gh（带 token 认证）从官方 release 下载 macOS arm64 build
           gh release download --repo mpv-player/mpv --pattern '*macos-14-arm.zip' --dir mpv-dl
           unzip -q mpv-dl/*.zip -d mpv-tmp
-          echo "=== extracted structure ==="
-          find mpv-tmp | head -40
+          # zip 内层是 mpv.tar.gz，再解压一层才是 mpv.app
+          tar -xzf mpv-tmp/mpv.tar.gz -C mpv-tmp
+          echo "=== structure ==="
+          find mpv-tmp -maxdepth 2 | head -40
           APP=$(find mpv-tmp -name '*.app' | head -1)
           echo "found app: $APP"
           mkdir -p electron/mpv
-          if [ -z "$APP" ]; then echo "!! no .app found, full listing:"; ls -laR mpv-tmp; exit 1; fi
+          if [ -z "$APP" ]; then echo "!! no .app found:"; find mpv-tmp | head -60; exit 1; fi
           cp -R "$APP" electron/mpv/mpv.app
           # ad-hoc 重签，确保 arm64 上能执行
           codesign --force --deep --sign - electron/mpv/mpv.app
