@@ -38,7 +38,7 @@
     "productName": "NekoPlayer",
     "directories": {
       "output": "release",
-      "buildResources": "build"
+      "buildResources": "buildResources"
     },
     "files": [
       "dist/**/*",

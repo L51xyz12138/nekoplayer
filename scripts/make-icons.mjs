@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
-const svg = path.join(root, '../build/icon.svg')
-const png = path.join(root, '../build/icon.png')
+const svg = path.join(root, '../buildResources/icon.svg')
+const png = path.join(root, '../buildResources/icon.png')
 
 await sharp(svg, { density: 384 }).resize(1024, 1024).png().toFile(png)
 

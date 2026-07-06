@@ -9,7 +9,7 @@ release/
 # 打包时下载/生成的资源（由 CI 或本地脚本获取，不提交）
 electron/mpv/bin/
 electron/mpv/mpv.app/
-build/icon.png
+buildResources/icon.png
 
 # 本地环境配置（含服务器地址 / 账号密码，切勿提交）
 .env.local
