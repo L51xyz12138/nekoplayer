@@ -1,0 +1,2 @@
+# uosc 是 Lua 写的第三方 mpv 脚本，不计入项目语言统计
+electron/mpv/** linguist-vendored
