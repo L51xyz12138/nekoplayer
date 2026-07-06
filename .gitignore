@@ -1,0 +1,33 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+dist-electron/
+release/
+
+# 打包时下载/生成的资源（由 CI 或本地脚本获取，不提交）
+electron/mpv/bin/
+electron/mpv/mpv.app/
+build/icon.png
+
+# 本地环境配置（含服务器地址 / 账号密码，切勿提交）
+.env.local
+.env.*.local
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器 / 系统
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln

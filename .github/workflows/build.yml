@@ -1,0 +1,82 @@
+name: Build Desktop Apps
+
+# 打三平台的包：手动触发，或推送 v* 标签时自动触发
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate app icon
+        run: npm run icons
+
+      # ---------- 自带 mpv（便携版，用户无需自行安装）----------
+      # 注：各平台 mpv 分发源 URL 偶有变动，失败不阻断打包（continue-on-error）
+      - name: Bundle mpv (Windows)
+        if: matrix.platform == 'win'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers @{ "User-Agent" = "nekoplayer" }
+          $asset = $rel.assets | Where-Object { $_.name -match "^mpv-x86_64-.*\.7z$" } | Select-Object -First 1
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mpv.7z
+          7z x mpv.7z -ompv-tmp
+          New-Item -ItemType Directory -Force -Path electron/mpv/bin | Out-Null
+          Copy-Item (Get-ChildItem -Recurse -Filter mpv.exe -Path mpv-tmp | Select-Object -First 1).FullName electron/mpv/bin/mpv.exe
+
+      - name: Bundle mpv (Linux)
+        if: matrix.platform == 'linux'
+        continue-on-error: true
+        run: |
+          mkdir -p electron/mpv/bin
+          curl -fL -o electron/mpv/bin/mpv "https://github.com/pkgforge-dev/mpv-AppImage/releases/latest/download/mpv-x86_64.AppImage"
+          chmod +x electron/mpv/bin/mpv
+
+      - name: Bundle mpv (macOS)
+        if: matrix.platform == 'mac'
+        continue-on-error: true
+        run: |
+          # macOS 需自包含的 mpv.app（stolendata build）；若源失效，mac 用户可改用 IINA
+          curl -fL -o mpv.tar.gz "https://laboratory.stolendata.net/~djinn/mpv_osx/mpv-latest-x86_64.tar.gz"
+          mkdir -p electron/mpv
+          tar -xzf mpv.tar.gz -C electron/mpv
+
+      - name: Build & package
+        run: npm run dist:${{ matrix.platform }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NekoPlayer-${{ matrix.platform }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: ignore

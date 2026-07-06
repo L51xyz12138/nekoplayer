@@ -1,0 +1,111 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Play } from 'lucide-vue-next'
+import PosterImage from '@/components/common/PosterImage.vue'
+import type { MediaItem } from '@/types/media'
+
+const props = defineProps<{ item: MediaItem }>()
+const emit = defineEmits<{ play: [item: MediaItem] }>()
+
+const remain = computed(() => Math.round(props.item.runtime * (1 - (props.item.progress ?? 0))))
+</script>
+
+<template>
+  <article class="cc" @click="emit('play', item)">
+    <div class="cc__thumb">
+      <PosterImage :seed="item.id" :src="item.backdropUrl" kind="backdrop" />
+      <div class="cc__scrim" />
+      <button class="cc__play" title="继续播放">
+        <Play :size="22" fill="currentColor" />
+      </button>
+      <div class="cc__bar">
+        <span :style="{ width: (item.progress ?? 0) * 100 + '%' }" />
+      </div>
+    </div>
+    <div class="cc__meta">
+      <h3 class="cc__title">{{ item.title }}</h3>
+      <p class="cc__info">
+        {{ item.type === 'series' ? '第 1 季 · ' : '' }}剩余 {{ remain }} 分钟
+      </p>
+    </div>
+  </article>
+</template>
+
+<style scoped>
+.cc {
+  cursor: pointer;
+  width: 100%;
+}
+
+.cc__thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-2);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.cc:hover .cc__thumb {
+  transform: translateY(-4px);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+
+.cc__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.55));
+}
+
+.cc__play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  color: #0b0c11;
+  background: rgba(255, 255, 255, 0.94);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.cc:hover .cc__play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.cc__bar {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.28);
+  overflow: hidden;
+}
+.cc__bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.cc__meta {
+  padding: 10px 2px 4px;
+}
+.cc__title {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc__info {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-mute);
+}
+</style>

@@ -1,0 +1,41 @@
+:root {
+  /* 强调色（可在设置里切换 --accent / --accent-2） */
+  --accent: #5b8cff;
+  --accent-2: #9d7bff;
+  --accent-soft: rgba(91, 140, 255, 0.16);
+  --accent-glow: rgba(91, 140, 255, 0.45);
+
+  /* 背景层次 */
+  --bg-0: #06070b;
+  --bg-1: #0b0c11;
+  --bg-2: #111319;
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --surface-hover: rgba(255, 255, 255, 0.11);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* 文本 */
+  --text: #f5f7fc;
+  --text-dim: #aeb6c8;
+  --text-mute: #6a7285;
+
+  /* 圆角 */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-pill: 999px;
+
+  /* 阴影 */
+  --shadow-card: 0 14px 34px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 28px 70px rgba(0, 0, 0, 0.62);
+
+  /* 磨砂 */
+  --blur: saturate(170%) blur(22px);
+
+  /* 尺寸 / 动效 */
+  --rail-w: 78px;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur: 0.22s;
+}
