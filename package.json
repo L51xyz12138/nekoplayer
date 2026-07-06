@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Infuse 风格的跨平台媒体播放器",
-  "author": "浮浮酱",
+  "author": {
+    "name": "浮浮酱",
+    "email": "szyw6yknyn@privaterelay.appleid.com"
+  },
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
@@ -12,10 +15,10 @@
     "preview": "vite preview",
     "electron": "electron electron/main.mjs",
     "icons": "node scripts/make-icons.mjs",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {
     "hls.js": "^1.5.20",
