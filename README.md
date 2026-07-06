@@ -34,7 +34,7 @@
 ### 🍎 macOS 首次打开
 应用未经 Apple 签名，首次打开若提示"已损坏"，把它拖到「应用程序」后执行一次即可：
 ```bash
-xattr -cr /Applications/NekoPlayer.app
+sudo xattr -cr /Applications/NekoPlayer.app
 ```
 
 ## 🚀 使用
