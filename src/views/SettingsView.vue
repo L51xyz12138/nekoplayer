@@ -35,7 +35,7 @@ const currentPlayerPath = computed({
       <p class="settings__sub">个性化你的 NekoPlayer 体验</p>
     </header>
 
-    <div class="settings__scroll no-scrollbar">
+    <div class="settings__scroll">
       <!-- 外观 -->
       <section class="group">
         <h2 class="group__title"><Palette :size="17" /> 外观</h2>

@@ -158,7 +158,9 @@ watch(
   grid-auto-columns: 290px;
   gap: 16px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  /* 上下留白，避免单集 hover 上移/描边被裁剪 */
+  padding: 8px 2px 6px;
+  margin-top: -8px;
   scroll-snap-type: x proximity;
 }
 .ep {

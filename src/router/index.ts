@@ -15,6 +15,12 @@ export const router = createRouter({
       props: true
     },
     {
+      path: '/collection/:id',
+      name: 'collection',
+      component: () => import('@/views/CollectionView.vue'),
+      props: true
+    },
+    {
       path: '/sources',
       name: 'sources',
       component: () => import('@/views/SourcesView.vue')

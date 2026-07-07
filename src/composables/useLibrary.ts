@@ -1,5 +1,14 @@
 import { computed, reactive, toRefs } from 'vue'
-import { getEpisodes, getItems, getNextUp, getResume, setFavorite, setPlayed } from '@/api/emby'
+import {
+  getCollections,
+  getEpisodes,
+  getItems,
+  getNextUp,
+  getResume,
+  getViews,
+  setFavorite,
+  setPlayed
+} from '@/api/emby'
 import { mapEmbyItem, mapEpisodes, mapNextUp } from '@/api/mapper'
 import { useSources } from './useSources'
 import { pget, pset } from './persist'
@@ -34,6 +43,8 @@ interface LibraryState {
   sort: SortMode
   /** 'all' 表示聚合全部来源，否则为具体媒体源 id */
   activeSourceId: string
+  /** 'all' 表示全部媒体库，否则为具体库 id（`serverId:viewId`） */
+  activeLibraryId: string
   loading: boolean
   error: string
   /** 是否已成功加载过一次真实数据 */
@@ -47,16 +58,34 @@ const state = reactive<LibraryState>({
   category: 'all',
   sort: 'recent',
   activeSourceId: 'all',
+  activeLibraryId: 'all',
   loading: false,
   error: '',
   loaded: false
 })
 
-// 先按当前来源把媒体缩小到作用域，其余派生数据都基于它
-const scoped = computed(() =>
+// 先按来源缩小，再按媒体库缩小；其余派生数据都基于最终 scoped
+const bySource = computed(() =>
   state.activeSourceId === 'all'
     ? state.items
     : state.items.filter((m) => m.sourceId === state.activeSourceId)
+)
+
+// 当前来源下的媒体库列表（服务器自带分类，去重；空库不会出现，因为其下无影视条目）
+const libraries = computed(() => {
+  const seen = new Map<string, { id: string; name: string }>()
+  for (const m of bySource.value) {
+    if (m.libraryId && !seen.has(m.libraryId)) {
+      seen.set(m.libraryId, { id: m.libraryId, name: m.libraryName ?? '媒体库' })
+    }
+  }
+  return [...seen.values()]
+})
+
+const scoped = computed(() =>
+  state.activeLibraryId === 'all'
+    ? bySource.value
+    : bySource.value.filter((m) => m.libraryId === state.activeLibraryId)
 )
 
 const counts = computed<Record<LibraryCategory, number>>(() => ({
@@ -67,19 +96,22 @@ const counts = computed<Record<LibraryCategory, number>>(() => ({
 }))
 
 const filtered = computed(() => {
-  let list = scoped.value.slice()
-
-  if (state.category === 'movie') list = list.filter((m) => m.type === 'movie')
-  else if (state.category === 'series') list = list.filter((m) => m.type === 'series')
-  else if (state.category === 'favorite') list = list.filter((m) => m.favorite)
-
   const q = state.query.trim().toLowerCase()
+
+  // 搜索时跨「全部媒体库 + 全部类型」（仅限当前源），确保能搜到剧集等任何条目；
+  // 非搜索时才按当前分类 tab 过滤
+  let list = (q ? bySource.value : scoped.value).slice()
+
   if (q) {
     list = list.filter(
       (m) =>
         m.title.toLowerCase().includes(q) ||
         m.genres.some((g) => g.toLowerCase().includes(q))
     )
+  } else {
+    if (state.category === 'movie') list = list.filter((m) => m.type === 'movie')
+    else if (state.category === 'series') list = list.filter((m) => m.type === 'series')
+    else if (state.category === 'favorite') list = list.filter((m) => m.favorite)
   }
 
   switch (state.sort) {
@@ -111,16 +143,23 @@ const continueWatching = computed(() =>
 
 const recentlyAdded = computed(() =>
   scoped.value
-    .slice()
+    .filter((m) => m.type !== 'collection')
     .sort((a, b) => b.addedAt - a.addedAt)
     .slice(0, 12)
 )
 
 const movies = computed(() => scoped.value.filter((m) => m.type === 'movie'))
 const series = computed(() => scoped.value.filter((m) => m.type === 'series'))
+const collections = computed(() => scoped.value.filter((m) => m.type === 'collection'))
 
-/** 首页 Hero 精选：当前来源里评分最高者 */
-const featured = computed(() => scoped.value.slice().sort((a, b) => b.rating - a.rating)[0])
+/** 首页 Hero 精选：当前来源里评分最高者（合集不参与） */
+const featured = computed(
+  () =>
+    scoped.value
+      .filter((m) => m.type !== 'collection')
+      .slice()
+      .sort((a, b) => b.rating - a.rating)[0]
+)
 
 function getById(id: string) {
   return state.items.find((m) => m.id === id)
@@ -174,6 +213,10 @@ function setSort(v: SortMode) {
 }
 function setActiveSource(id: string) {
   state.activeSourceId = id
+  state.activeLibraryId = 'all' // 不同源的库不同，切源时重置到全部库
+}
+function setActiveLibrary(id: string) {
+  state.activeLibraryId = id
 }
 
 function clearLibrary() {
@@ -201,14 +244,44 @@ async function loadFromEmby() {
     // 并发拉取每个启用源，聚合为一个媒体库（单源失败不影响其它源）
     const groups = await Promise.all(
       embySources.map(async (src) => {
+        const session = src.session!
         try {
-          // 同时拉媒体列表、「下一集待看」、「继续观看」，用 SeriesId 把续看集挂到对应剧集上
-          const [items, nextUps, resumes] = await Promise.all([
-            getItems(src.session!),
-            getNextUp(src.session!).catch(() => []),
-            getResume(src.session!).catch(() => [])
+          // 拉服务器自带的媒体库（Views）+「下一集待看」+「继续观看」+ 合集
+          const [views, nextUps, resumes, collections] = await Promise.all([
+            getViews(session).catch(() => []),
+            getNextUp(session).catch(() => []),
+            getResume(session).catch(() => []),
+            getCollections(session).catch(() => [])
           ])
-          const mapped = items.map((it) => mapEmbyItem(it, src.session!))
+          // 只取含影视的库（跳过纯音乐/图片库，避免无意义请求；boxsets 会与电影重复故排除）
+          const videoViews = views.filter(
+            (v) => !v.CollectionType || ['movies', 'tvshows', 'mixed'].includes(v.CollectionType)
+          )
+
+          let mapped: MediaItem[]
+          if (videoViews.length) {
+            // 按库分别拉取，给每条打上服务器的库归属（分类完全由服务器决定）
+            const perView = await Promise.all(
+              videoViews.map(async (v) => {
+                const items = await getItems(session, { ParentId: v.Id }).catch(() => [])
+                return items.map((it) => {
+                  const m = mapEmbyItem(it, session)
+                  m.libraryId = `${session.serverId}:${v.Id}`
+                  m.libraryName = v.Name
+                  return m
+                })
+              })
+            )
+            // 保险去重（一条目理论上只属一个库）
+            const uniq = new Map<string, MediaItem>()
+            for (const m of perView.flat()) if (!uniq.has(m.id)) uniq.set(m.id, m)
+            mapped = [...uniq.values()]
+          } else {
+            // 服务器无 Views（或都非视频库）：退回一次性拉全库，不分类
+            const items = await getItems(session).catch(() => [])
+            mapped = items.map((it) => mapEmbyItem(it, session))
+          }
+
           const byId = new Map(mapped.map((m) => [m.id, m]))
           // 端点已按最近活动排序：用其顺序赋「最近播放」时间戳
           // （魔改 Emby 常不给 LastPlayedDate，用排名兜底，rank 越小越近）
@@ -232,7 +305,8 @@ async function loadFromEmby() {
             series.nextUp = mapNextUp(e, src.session!)
             stamp(series, e.UserData?.LastPlayedDate, resumes.length + i)
           })
-          return mapped
+          // 合集追加进来（无 libraryId，仅在「全部库」下出现；可搜索、可浏览）
+          return [...mapped, ...collections.map((c) => mapEmbyItem(c, session))]
         } catch (e) {
           console.warn('[NekoPlayer] 媒体源加载失败：', src.name, e)
           return [] as MediaItem[]
@@ -277,12 +351,14 @@ export function useLibrary() {
   return {
     ...toRefs(state),
     scoped,
+    libraries,
     counts,
     filtered,
     continueWatching,
     recentlyAdded,
     movies,
     series,
+    collections,
     featured,
     getById,
     toggleFavorite,
@@ -292,6 +368,7 @@ export function useLibrary() {
     setCategory,
     setSort,
     setActiveSource,
+    setActiveLibrary,
     clearLibrary,
     loadFromEmby,
     loadSeasons

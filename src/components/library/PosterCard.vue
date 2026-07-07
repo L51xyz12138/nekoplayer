@@ -11,7 +11,8 @@ const emit = defineEmits<{ favorite: [id: string]; play: [item: MediaItem] }>()
 const router = useRouter()
 
 function open() {
-  router.push(`/detail/${props.item.id}`)
+  const path = props.item.type === 'collection' ? 'collection' : 'detail'
+  router.push(`/${path}/${props.item.id}`)
 }
 </script>
 
@@ -23,10 +24,10 @@ function open() {
         :title="item.title"
         :src="item.posterUrl"
         kind="poster"
-        :label="item.type === 'series' ? '剧集' : ''"
+        :label="item.type === 'series' ? '剧集' : item.type === 'collection' ? '合集' : ''"
       />
 
-      <div class="card__overlay">
+      <div v-if="item.type !== 'collection'" class="card__overlay">
         <button class="card__play" title="播放" @click.stop="emit('play', item)">
           <Play :size="20" fill="currentColor" />
         </button>

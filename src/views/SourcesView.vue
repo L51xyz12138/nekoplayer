@@ -65,7 +65,7 @@ function browse(source: MediaSource) {
       </button>
     </header>
 
-    <div class="sources__scroll no-scrollbar">
+    <div class="sources__scroll">
       <SourceList
         v-if="sources.length"
         :sources="sources"

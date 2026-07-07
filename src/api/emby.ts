@@ -3,7 +3,7 @@
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
-const APP_VERSION = '0.1.4'
+const APP_VERSION = '0.1.5'
 
 function getDeviceId(): string {
   const KEY = 'neko-device-id'
@@ -153,7 +153,21 @@ export async function authenticate(
   }
 }
 
-/** 拉取媒体库项目（电影 + 剧集） */
+export interface EmbyView {
+  Id: string
+  Name: string
+  /** 库类型：movies / tvshows / music / boxsets / mixed … */
+  CollectionType?: string
+}
+
+/** 拉取用户可见的媒体库（服务器自带分类，与 Emby 首页的库 tile 一致） */
+export async function getViews(session: EmbySession): Promise<EmbyView[]> {
+  const res = await request(session.serverUrl, `/Users/${session.userId}/Views`, session.token)
+  const data = await res.json()
+  return (data.Items ?? []) as EmbyView[]
+}
+
+/** 拉取媒体库项目（电影 + 剧集）；传 ParentId 可只拉某个库 */
 export async function getItems(
   session: EmbySession,
   params: Record<string, string> = {}
@@ -170,6 +184,11 @@ export async function getItems(
   const res = await request(session.serverUrl, `/Users/${session.userId}/Items?${q}`, session.token)
   const data = await res.json()
   return (data.Items ?? []) as EmbyItem[]
+}
+
+/** 拉取合集（Collection / BoxSet，如「霍比特人系列」） */
+export async function getCollections(session: EmbySession): Promise<EmbyItem[]> {
+  return getItems(session, { IncludeItemTypes: 'BoxSet' })
 }
 
 /** 拉取单个条目详情 */

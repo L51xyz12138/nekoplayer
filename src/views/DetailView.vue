@@ -93,7 +93,7 @@ function playItem(m: MediaItem) {
       </transition>
     </header>
 
-    <div class="detail__scroll no-scrollbar" @scroll="onScroll">
+    <div class="detail__scroll" @scroll="onScroll">
       <DetailHero
         :item="item"
         @play="play"

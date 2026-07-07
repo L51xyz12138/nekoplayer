@@ -1,4 +1,4 @@
-export type MediaType = 'movie' | 'series'
+export type MediaType = 'movie' | 'series' | 'collection'
 
 export type SortMode = 'recent' | 'title' | 'rating' | 'year'
 
@@ -57,6 +57,10 @@ export interface MediaItem {
   id: string
   /** 所属媒体源 id */
   sourceId: string
+  /** 所属服务器媒体库 id（`serverId:viewId`），来自服务器自带分类；聚合全库时可能为空 */
+  libraryId?: string
+  /** 媒体库显示名（服务器上的库名，如「电影」「动漫」） */
+  libraryName?: string
   title: string
   type: MediaType
   year: number

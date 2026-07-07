@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
 import SourceTabs from '@/components/library/SourceTabs.vue'
+import LibraryTabs from '@/components/library/LibraryTabs.vue'
 import HeroBanner from '@/components/library/HeroBanner.vue'
 import MediaRow from '@/components/library/MediaRow.vue'
 import PosterGrid from '@/components/library/PosterGrid.vue'
@@ -29,6 +30,7 @@ const {
   recentlyAdded,
   movies,
   series,
+  collections,
   featured,
   loading,
   error,
@@ -59,6 +61,7 @@ function play(item: MediaItem) {
   <div class="library">
     <div class="library__topbar">
       <SourceTabs />
+      <LibraryTabs />
       <TopBar
         :query="query"
         :category="category"
@@ -70,7 +73,7 @@ function play(item: MediaItem) {
       />
     </div>
 
-    <div class="library__scroll no-scrollbar">
+    <div class="library__scroll">
       <!-- 已有内容时的后台拉取提示（首次无内容走下方骨架屏） -->
       <div v-if="loading && items.length" class="library__loading-pill">
         <span class="library__mini-spin" />
@@ -130,6 +133,7 @@ function play(item: MediaItem) {
               />
             </MediaRow>
 
+            <PosterGrid v-if="collections.length" title="合集" :items="collections" @favorite="toggleFavorite" @play="play" />
             <PosterGrid v-if="movies.length" title="电影" :items="movies" @favorite="toggleFavorite" @play="play" />
             <PosterGrid v-if="series.length" title="剧集" :items="series" @favorite="toggleFavorite" @play="play" />
           </div>

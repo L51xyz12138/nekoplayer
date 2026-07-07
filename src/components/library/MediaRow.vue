@@ -75,9 +75,9 @@ function scroll(dir: number) {
   grid-auto-columns: var(--col);
   gap: 18px;
   overflow-x: auto;
-  /* 上下留白，避免卡片 hover 上移/放大被裁剪 */
-  padding: 8px 0 6px;
-  margin-top: -8px;
+  /* 上下留白，避免卡片 hover 上移/放大被裁剪（海报卡有 scale，需更多余量） */
+  padding: 14px 4px 10px;
+  margin-top: -14px;
   scroll-snap-type: x proximity;
 }
 .row__track > :deep(*) {

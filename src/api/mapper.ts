@@ -68,7 +68,8 @@ function mapTech(item: EmbyItem): MediaTech | undefined {
 
 /** 把 Emby Item 映射为应用内部的 MediaItem */
 export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
-  const isSeries = item.Type === 'Series'
+  const type: MediaItem['type'] =
+    item.Type === 'Series' ? 'series' : item.Type === 'BoxSet' ? 'collection' : 'movie'
   const primaryTag = item.ImageTags?.Primary
   const backdropTag = item.BackdropImageTags?.[0]
 
@@ -76,7 +77,7 @@ export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
     id: item.Id,
     sourceId: session.serverId,
     title: item.Name,
-    type: isSeries ? 'series' : 'movie',
+    type,
     year: item.ProductionYear ?? 0,
     runtime: item.RunTimeTicks ? Math.round(item.RunTimeTicks / TICKS_PER_MINUTE) : 0,
     rating: item.CommunityRating ? Math.round(item.CommunityRating * 10) / 10 : 0,

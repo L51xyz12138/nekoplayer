@@ -55,13 +55,13 @@ ol {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(140, 145, 160, 0.42);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(140, 145, 160, 0.66);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-track {
