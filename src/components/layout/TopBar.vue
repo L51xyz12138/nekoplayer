@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, ChevronDown } from 'lucide-vue-next'
+import { Search, ChevronDown, X } from 'lucide-vue-next'
 import { ref } from 'vue'
 import type { LibraryCategory, SortMode } from '@/types/media'
 
@@ -62,6 +62,15 @@ function pickSort(mode: SortMode) {
           placeholder="搜索影片、剧集…"
           @input="emit('update:query', ($event.target as HTMLInputElement).value)"
         />
+        <button
+          v-if="query"
+          type="button"
+          class="search__clear"
+          title="清除"
+          @click="emit('update:query', '')"
+        >
+          <X :size="15" />
+        </button>
       </label>
 
       <div class="sort" @click.stop="sortOpen = !sortOpen">
@@ -176,6 +185,20 @@ function pickSort(mode: SortMode) {
 }
 .search input::placeholder {
   color: var(--text-mute);
+}
+.search__clear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--text-mute);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.search__clear:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 .sort {

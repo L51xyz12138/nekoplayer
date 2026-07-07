@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Plus, Server } from 'lucide-vue-next'
 import SourceList from '@/components/source/SourceList.vue'
 import AddSourceDialog from '@/components/source/AddSourceDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
 import type { MediaSource } from '@/types/source'
@@ -12,10 +13,17 @@ const router = useRouter()
 const { sources, addSource, updateSource, toggleSource, removeSource } = useSources()
 const { setActiveSource, loadFromEmby } = useLibrary()
 
-// 删除媒体源后重新聚合剩余源
+// 删除媒体源：先二次确认，确认后再移除并重新聚合剩余源
+const pendingRemove = ref<MediaSource | null>(null)
 function remove(id: string) {
-  removeSource(id)
-  loadFromEmby()
+  pendingRemove.value = sources.value.find((s) => s.id === id) ?? null
+}
+function confirmRemove() {
+  if (pendingRemove.value) {
+    removeSource(pendingRemove.value.id)
+    loadFromEmby()
+  }
+  pendingRemove.value = null
 }
 // 启用 / 停用源后刷新媒体库
 function toggle(id: string) {
@@ -82,6 +90,16 @@ function browse(source: MediaSource) {
       @close="closeDialog"
       @add="addSource"
       @update="updateSource"
+    />
+
+    <ConfirmDialog
+      :open="!!pendingRemove"
+      danger
+      title="移除媒体源"
+      :message="`确定移除「${pendingRemove?.name}」吗？该源的媒体会从库中消失（不影响服务器上的文件，之后可重新添加）。`"
+      confirm-text="移除"
+      @confirm="confirmRemove"
+      @cancel="pendingRemove = null"
     />
   </div>
 </template>

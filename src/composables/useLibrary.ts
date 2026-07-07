@@ -17,8 +17,14 @@ function loadCache(): MediaItem[] {
   }
 }
 
+let cacheTimer: ReturnType<typeof setTimeout> | undefined
 function saveCache(items: MediaItem[]) {
-  pset(CACHE_KEY, JSON.stringify(items))
+  // 大库 JSON.stringify 较重：去抖 + 延后到空闲，避免阻塞加载后的首屏交互
+  if (cacheTimer) clearTimeout(cacheTimer)
+  cacheTimer = setTimeout(() => {
+    cacheTimer = undefined
+    pset(CACHE_KEY, JSON.stringify(items))
+  }, 500)
 }
 
 interface LibraryState {

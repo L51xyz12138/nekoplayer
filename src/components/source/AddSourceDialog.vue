@@ -95,8 +95,9 @@ async function submit() {
   try {
     const session = await login(buildAddress(), form.username, form.password)
     upsertEmbySource(session, name.value)
-    await loadFromEmby()
     emit('close')
+    // 大库拉取较慢，放后台进行（主页显示骨架屏/继续观看），不阻塞关窗
+    loadFromEmby()
   } catch (e) {
     connectError.value = e instanceof Error ? e.message : '连接失败，请检查地址与账号密码'
   } finally {

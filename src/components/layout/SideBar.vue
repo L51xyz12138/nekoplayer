@@ -98,7 +98,7 @@ function isActive(name: string) {
   background: var(--surface);
 }
 .rail__item.is-active {
-  color: #fff;
+  color: var(--accent);
 }
 .rail__item.is-active .rail__glow {
   opacity: 1;

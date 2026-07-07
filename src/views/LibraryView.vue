@@ -71,6 +71,12 @@ function play(item: MediaItem) {
     </div>
 
     <div class="library__scroll no-scrollbar">
+      <!-- 已有内容时的后台拉取提示（首次无内容走下方骨架屏） -->
+      <div v-if="loading && items.length" class="library__loading-pill">
+        <span class="library__mini-spin" />
+        正在拉取媒体信息…
+      </div>
+
       <!-- 首次加载（无缓存）：骨架屏。有缓存时直接显示旧内容并后台刷新 -->
       <div v-if="loading && !items.length" class="library__body library__body--filter">
         <div class="library__skeleton">
@@ -198,5 +204,38 @@ function play(item: MediaItem) {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 22px 20px;
+}
+
+.library__loading-pill {
+  position: sticky;
+  top: 6px;
+  z-index: 5;
+  width: fit-content;
+  margin: 0 auto 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  backdrop-filter: var(--blur);
+}
+.library__mini-spin {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

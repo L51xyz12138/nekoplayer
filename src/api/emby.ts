@@ -3,7 +3,7 @@
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
-const APP_VERSION = '0.1.3'
+const APP_VERSION = '0.1.4'
 
 function getDeviceId(): string {
   const KEY = 'neko-device-id'
