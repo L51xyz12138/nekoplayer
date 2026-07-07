@@ -86,6 +86,26 @@ ol {
   opacity: 0;
 }
 
+/* 骨架屏微光：加载占位用，随主题深浅自适应 */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+}
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--surface-hover), transparent);
+  animation: shimmer 1.4s var(--ease) infinite;
+}
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 /* 通用工具类 */
 .clamp-2 {
   display: -webkit-box;

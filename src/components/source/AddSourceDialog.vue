@@ -206,7 +206,7 @@ async function submit() {
   width: 100%;
   max-width: 520px;
   max-height: 86vh;
-  background: linear-gradient(180deg, #14161e, #0f1016);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
   border: 1px solid var(--border-strong);
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-pop);
@@ -234,7 +234,7 @@ async function submit() {
   transition: background var(--dur), color var(--dur);
 }
 .dialog__x:hover {
-  color: #fff;
+  color: var(--text);
   background: var(--surface-hover);
 }
 
@@ -396,7 +396,7 @@ async function submit() {
   border: 1px solid var(--border);
 }
 .btn--ghost:hover {
-  color: #fff;
+  color: var(--text);
   background: var(--surface);
 }
 .btn--primary {

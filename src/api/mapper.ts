@@ -1,7 +1,16 @@
-import type { Episode, MediaItem, MediaTech, Person, Season } from '@/types/media'
+import type { Episode, MediaItem, MediaTech, NextUpEpisode, Person, Season } from '@/types/media'
 import { imageUrl, type EmbyItem, type EmbyPerson, type EmbySession } from './emby'
 
 const TICKS_PER_MINUTE = 600_000_000 // 1 分钟 = 6e8 个 100ns tick
+
+/** 稳健地算进度 0-1：优先 PlayedPercentage，缺失时用 位置/时长（魔改 Emby 常不给百分比，但恒有 PlaybackPositionTicks） */
+function progressOf(userData: EmbyItem['UserData'], runTimeTicks?: number): number | undefined {
+  const pct = userData?.PlayedPercentage
+  if (pct && pct > 0 && pct < 100) return pct / 100
+  const pos = userData?.PlaybackPositionTicks ?? 0
+  if (pos > 0 && runTimeTicks && runTimeTicks > 0) return Math.min(0.999, pos / runTimeTicks)
+  return undefined
+}
 
 function mapPeople(people: EmbyPerson[] | undefined, serverUrl: string): Person[] {
   if (!people) return []
@@ -62,7 +71,6 @@ export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
   const isSeries = item.Type === 'Series'
   const primaryTag = item.ImageTags?.Primary
   const backdropTag = item.BackdropImageTags?.[0]
-  const percent = item.UserData?.PlayedPercentage
 
   return {
     id: item.Id,
@@ -78,11 +86,27 @@ export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
     tagline: item.Taglines?.[0],
     cast: mapPeople(item.People, session.serverUrl),
     favorite: item.UserData?.IsFavorite,
-    progress: percent && percent > 0 && percent < 100 ? percent / 100 : undefined,
+    watched: item.UserData?.Played,
+    progress: progressOf(item.UserData, item.RunTimeTicks),
+    positionTicks: item.UserData?.PlaybackPositionTicks || undefined,
     addedAt: item.DateCreated ? Date.parse(item.DateCreated) : Date.now(),
+    lastPlayed: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) : undefined,
     tech: mapTech(item),
     posterUrl: imageUrl(session.serverUrl, item.Id, 'Primary', primaryTag, 480),
     backdropUrl: imageUrl(session.serverUrl, item.Id, 'Backdrop', backdropTag, 1280)
+  }
+}
+
+/** 把 Emby NextUp 分集映射为轻量的「下一集待看」信息 */
+export function mapNextUp(e: EmbyItem, session: EmbySession): NextUpEpisode {
+  return {
+    episodeId: e.Id,
+    season: e.ParentIndexNumber ?? 1,
+    episode: e.IndexNumber ?? 0,
+    title: e.Name,
+    progress: progressOf(e.UserData, e.RunTimeTicks),
+    positionTicks: e.UserData?.PlaybackPositionTicks || undefined,
+    stillUrl: imageUrl(session.serverUrl, e.Id, 'Primary', e.ImageTags?.Primary, 480)
   }
 }
 
@@ -92,7 +116,6 @@ export function mapEpisodes(episodes: EmbyItem[], session: EmbySession): Season[
 
   for (const e of episodes) {
     const seasonNum = e.ParentIndexNumber ?? 1
-    const percent = e.UserData?.PlayedPercentage
     const ep: Episode = {
       id: e.Id,
       season: seasonNum,
@@ -100,7 +123,9 @@ export function mapEpisodes(episodes: EmbyItem[], session: EmbySession): Season[
       title: e.Name,
       runtime: e.RunTimeTicks ? Math.round(e.RunTimeTicks / TICKS_PER_MINUTE) : 0,
       overview: e.Overview ?? '',
-      progress: percent && percent > 0 && percent < 100 ? percent / 100 : undefined,
+      progress: progressOf(e.UserData, e.RunTimeTicks),
+      positionTicks: e.UserData?.PlaybackPositionTicks || undefined,
+      watched: e.UserData?.Played,
       stillSeed: e.Id,
       stillUrl: imageUrl(session.serverUrl, e.Id, 'Primary', e.ImageTags?.Primary, 480)
     }

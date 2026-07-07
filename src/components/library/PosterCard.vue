@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { Heart, Play } from 'lucide-vue-next'
+import { Check, Heart, Play } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
 import RatingPill from '@/components/common/RatingPill.vue'
 import type { MediaItem } from '@/types/media'
@@ -40,6 +40,10 @@ function open() {
       >
         <Heart :size="15" :fill="item.favorite ? 'currentColor' : 'none'" />
       </button>
+
+      <div v-if="item.watched" class="card__watched" title="已看完">
+        <Check :size="13" />
+      </div>
 
       <div v-if="item.progress" class="card__bar">
         <span :style="{ width: item.progress * 100 + '%' }" />
@@ -126,6 +130,20 @@ function open() {
 }
 .card__fav.on {
   color: #ff6b8b;
+}
+
+.card__watched {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .card__bar {

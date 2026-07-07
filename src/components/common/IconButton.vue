@@ -4,13 +4,15 @@ withDefaults(
     label?: string
     variant?: 'solid' | 'glass' | 'ghost'
     round?: boolean
+    /** 选中态（如「已收藏」「已看」），用强调色高亮 */
+    active?: boolean
   }>(),
-  { variant: 'glass', round: false }
+  { variant: 'glass', round: false, active: false }
 )
 </script>
 
 <template>
-  <button class="icon-btn" :class="[variant, { round }]">
+  <button class="icon-btn" :class="[variant, { round, on: active }]">
     <slot />
     <span v-if="label" class="icon-btn__label">{{ label }}</span>
   </button>
@@ -66,5 +68,16 @@ withDefaults(
 .icon-btn.ghost:hover {
   color: var(--text);
   background: var(--surface);
+}
+
+/* 选中态：实心强调色，放最后确保覆盖各 variant 的默认配色 */
+.icon-btn.on {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+.icon-btn.on:hover {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 </style>

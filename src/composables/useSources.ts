@@ -1,4 +1,5 @@
 import { computed, ref, watch } from 'vue'
+import { pget, pset } from './persist'
 import type { EmbySession } from '@/api/emby'
 import type { MediaSource } from '@/types/source'
 
@@ -6,17 +7,17 @@ const SOURCES_KEY = 'neko-sources'
 
 function loadSources(): MediaSource[] {
   try {
-    const raw = localStorage.getItem(SOURCES_KEY)
+    const raw = pget(SOURCES_KEY)
     return raw ? (JSON.parse(raw) as MediaSource[]) : []
   } catch {
     return []
   }
 }
 
-// 模块级单例：媒体源列表（含各自的 Emby 会话），持久化到 localStorage
+// 模块级单例：媒体源列表（含各自的 Emby 会话），持久化到文件存储（Electron）/ localStorage（web）
 const sources = ref<MediaSource[]>(loadSources())
 
-watch(sources, () => localStorage.setItem(SOURCES_KEY, JSON.stringify(sources.value)), {
+watch(sources, () => pset(SOURCES_KEY, JSON.stringify(sources.value)), {
   deep: true
 })
 

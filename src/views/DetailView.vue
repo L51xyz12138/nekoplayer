@@ -15,10 +15,13 @@ import type { Episode, MediaItem } from '@/types/media'
 const props = defineProps<{ id: string }>()
 
 const router = useRouter()
-const { getById, items, toggleFavorite, loadSeasons } = useLibrary()
+const { getById, items, toggleFavorite, toggleWatched, loadSeasons } = useLibrary()
 const player = usePlayer()
 
 const item = computed(() => getById(props.id))
+
+// 续看集 id：用于剧集列表自动定位/高亮到「正在看的那一集」
+const resumeId = computed(() => (item.value ? player.resumeEpisodeOf(item.value)?.id : undefined))
 
 const related = computed(() => {
   const cur = item.value
@@ -28,11 +31,11 @@ const related = computed(() => {
     .slice(0, 10)
 })
 
-// 剧集：进入详情页时懒加载季/集列表
+// 剧集：懒加载季/集列表。监听 item 对象本身——loadFromEmby（刷新/播放结束）会用
+// 无 seasons 的新对象替换 item，此时需为新对象重新加载，否则剧集列表会消失
 watch(
-  () => item.value?.id,
-  () => {
-    const it = item.value
+  item,
+  (it) => {
     if (it && it.type === 'series' && !it.seasons) loadSeasons(it.id)
   },
   { immediate: true }
@@ -48,9 +51,8 @@ function play() {
   const it = item.value
   if (!it) return
   if (it.type === 'series') {
-    // 剧集：播续看的那一集，没有则播第一集
-    const eps = it.seasons?.flatMap((s) => s.episodes) ?? []
-    const resume = eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ?? eps[0]
+    // 剧集：播续看的那一集（优先 NextUp），没有则播第一集
+    const resume = player.resumeEpisodeOf(it)
     if (resume) player.play(it, resume)
   } else {
     player.play(it)
@@ -63,8 +65,7 @@ function playWith(playerName: string) {
   const it = item.value
   if (!it) return
   if (it.type === 'series') {
-    const eps = it.seasons?.flatMap((s) => s.episodes) ?? []
-    const resume = eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ?? eps[0]
+    const resume = player.resumeEpisodeOf(it)
     if (resume) player.playWith(it, resume, playerName)
   } else {
     player.playWith(it, undefined, playerName)
@@ -72,6 +73,9 @@ function playWith(playerName: string) {
 }
 function fav() {
   if (item.value) toggleFavorite(item.value.id)
+}
+function watched() {
+  if (item.value) toggleWatched(item.value.id)
 }
 function playItem(m: MediaItem) {
   player.play(m)
@@ -90,13 +94,20 @@ function playItem(m: MediaItem) {
     </header>
 
     <div class="detail__scroll no-scrollbar" @scroll="onScroll">
-      <DetailHero :item="item" @play="play" @favorite="fav" @play-with="playWith" />
+      <DetailHero
+        :item="item"
+        @play="play"
+        @favorite="fav"
+        @play-with="playWith"
+        @toggle-watched="watched"
+      />
 
       <div class="detail__body">
         <MediaTechInfo v-if="item.tech" :tech="item.tech" />
         <EpisodeList
           v-if="item.type === 'series' && item.seasons"
           :seasons="item.seasons"
+          :resume-id="resumeId"
           @play="playEpisode"
         />
         <CastRow v-if="item.cast.length" title="演职人员" :people="item.cast" />

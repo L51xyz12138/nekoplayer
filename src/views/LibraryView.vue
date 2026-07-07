@@ -8,6 +8,7 @@ import MediaRow from '@/components/library/MediaRow.vue'
 import PosterGrid from '@/components/library/PosterGrid.vue'
 import PosterCard from '@/components/library/PosterCard.vue'
 import ContinueCard from '@/components/library/ContinueCard.vue'
+import SkeletonCard from '@/components/library/SkeletonCard.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useEmby } from '@/composables/useEmby'
 import { usePlayer } from '@/composables/usePlayer'
@@ -70,10 +71,11 @@ function play(item: MediaItem) {
     </div>
 
     <div class="library__scroll no-scrollbar">
-      <!-- 加载中 -->
-      <div v-if="loading" class="library__state">
-        <div class="library__spinner" />
-        <p>正在加载媒体库…</p>
+      <!-- 首次加载（无缓存）：骨架屏。有缓存时直接显示旧内容并后台刷新 -->
+      <div v-if="loading && !items.length" class="library__body library__body--filter">
+        <div class="library__skeleton">
+          <SkeletonCard v-for="n in 18" :key="n" />
+        </div>
       </div>
 
       <!-- 加载失败 -->
@@ -192,17 +194,9 @@ function play(item: MediaItem) {
   border-radius: var(--r-pill);
   box-shadow: 0 8px 22px var(--accent-glow);
 }
-.library__spinner {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 4px solid rgba(255, 255, 255, 0.18);
-  border-top-color: var(--accent);
-  animation: spin 0.9s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.library__skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 22px 20px;
 }
 </style>

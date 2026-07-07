@@ -11,5 +11,9 @@ contextBridge.exposeInMainWorld('nekoNative', {
   playExternal: (player, url, appPath, startSec) =>
     ipcRenderer.invoke('play-external', { player, url, appPath, startSec }),
   // 外部播放结束后主进程通知，前端据此刷新进度
-  onPlaybackEnded: (cb) => ipcRenderer.on('playback-ended', () => cb())
+  onPlaybackEnded: (cb) => ipcRenderer.on('playback-ended', () => cb()),
+  // 持久化存储（写到 userData 下的 json 文件，跨软件更新不丢；读同步、写异步）
+  storeGet: (key) => ipcRenderer.sendSync('store-get', key),
+  storeSet: (key, val) => ipcRenderer.send('store-set', { key, val }),
+  storeRemove: (key) => ipcRenderer.send('store-remove', key)
 })

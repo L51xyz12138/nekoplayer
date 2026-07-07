@@ -1,4 +1,5 @@
 import { reactive, watch } from 'vue'
+import { pget, pset } from './persist'
 
 export interface ThemePreset {
   name: string
@@ -47,7 +48,7 @@ const KEY = 'neko-settings'
 
 function load(): Settings {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = pget(KEY)
     return raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS }
   } catch {
     return { ...DEFAULTS }
@@ -87,7 +88,7 @@ prefersLight.addEventListener('change', () => {
 watch(
   settings,
   () => {
-    localStorage.setItem(KEY, JSON.stringify(settings))
+    pset(KEY, JSON.stringify(settings))
     applyTheme(settings.themeIndex)
     applyScheme(settings.colorScheme)
   },

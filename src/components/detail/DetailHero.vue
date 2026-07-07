@@ -7,11 +7,17 @@ import MetaBar from './MetaBar.vue'
 import type { MediaItem } from '@/types/media'
 
 const props = defineProps<{ item: MediaItem }>()
-const emit = defineEmits<{ play: []; favorite: []; 'play-with': [player: string] }>()
+const emit = defineEmits<{
+  play: []
+  favorite: []
+  'play-with': [player: string]
+  'toggle-watched': []
+}>()
 
-// 播放进度：电影用自身进度；剧集用「续看的那一集」的进度
+// 播放进度：电影用自身进度；剧集优先用 NextUp 的下一集，其次进度未完成的那一集
 const resumeEp = computed(() => {
   if (props.item.type !== 'series') return null
+  if (props.item.nextUp) return props.item.nextUp
   const eps = props.item.seasons?.flatMap((s) => s.episodes) ?? []
   return eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ?? null
 })
@@ -26,7 +32,7 @@ const progressText = computed(() =>
 )
 
 // 当前平台可用的播放器（仅 Electron 显示快捷按钮）
-const nn = (window as unknown as { nekoNative?: { platform?: string; playMpv?: unknown } }).nekoNative
+const nn = window.nekoNative
 const players: string[] = nn?.playMpv
   ? (
       {
@@ -89,13 +95,19 @@ const players: string[] = nn?.playMpv
           <IconButton
             variant="glass"
             round
-            :class="{ 'is-fav': item.favorite }"
+            :active="item.favorite"
             :title="item.favorite ? '取消收藏' : '收藏'"
             @click="emit('favorite')"
           >
             <Heart :size="18" :fill="item.favorite ? 'currentColor' : 'none'" />
           </IconButton>
-          <IconButton variant="glass" round title="标记已看">
+          <IconButton
+            variant="glass"
+            round
+            :active="item.watched"
+            :title="item.watched ? '取消已看' : '标记已看'"
+            @click="emit('toggle-watched')"
+          >
             <Check :size="18" />
           </IconButton>
         </div>
@@ -213,8 +225,5 @@ const players: string[] = nn?.playMpv
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 26px;
-}
-.is-fav {
-  color: #ff6b8b;
 }
 </style>

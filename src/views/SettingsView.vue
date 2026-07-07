@@ -9,8 +9,7 @@ const { settings, themes } = useSettings()
 const subColors = ['#ffffff', '#ffce53', '#7fe7ff', '#a0ff9d']
 
 // 按当前平台提供可选播放器
-const native = (window as unknown as { nekoNative?: { platform?: string } }).nekoNative
-const platform = native?.platform ?? 'darwin'
+const platform = window.nekoNative?.platform ?? 'darwin'
 const playerOptions: string[] =
   (
     {

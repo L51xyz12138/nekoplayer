@@ -24,6 +24,10 @@ export interface Episode {
   overview: string
   /** 观看进度 0-1 */
   progress?: number
+  /** 续播位置（Emby ticks，1 秒=10^7）；比 progress 精确，用于 seek */
+  positionTicks?: number
+  /** 是否已看完 */
+  watched?: boolean
   /** 生成缩略图的种子 */
   stillSeed: string
   /** 真实缩略图 URL（来自媒体服务器） */
@@ -34,6 +38,19 @@ export interface Season {
   season: number
   title: string
   episodes: Episode[]
+}
+
+/** 剧集「下一集待看」的轻量信息（来自 Emby NextUp，无需加载整季即可展示/续播） */
+export interface NextUpEpisode {
+  episodeId: string
+  season: number
+  episode: number
+  title: string
+  /** 该集已观看进度 0-1（新的一集为空） */
+  progress?: number
+  /** 续播位置（Emby ticks）——来自 Resume 端点，比 getEpisodes 可靠 */
+  positionTicks?: number
+  stillUrl?: string
 }
 
 export interface MediaItem {
@@ -55,9 +72,17 @@ export interface MediaItem {
   cast: Person[]
   /** 继续观看进度 0-1 */
   progress?: number
+  /** 续播位置（Emby ticks，1 秒=10^7）；比 progress 精确，用于 seek */
+  positionTicks?: number
+  /** 是否已看完（电影；剧集看 nextUp 是否存在判断是否追完） */
+  watched?: boolean
+  /** 剧集下一集待看（来自 Emby /Shows/NextUp）；无则表示已追完或未开始 */
+  nextUp?: NextUpEpisode
   favorite?: boolean
   /** 时间戳，用于「最近添加」排序 */
   addedAt: number
+  /** 最近一次播放的时间戳，用于「继续观看」按最近排序 */
+  lastPlayed?: number
   /** 仅剧集拥有 */
   seasons?: Season[]
   /** 文件与画质等技术信息 */

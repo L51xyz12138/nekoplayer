@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +16,39 @@ const MPV_CONFIG_DIR = app.isPackaged
 
 let mpvProc = null
 let mainWin = null
+
+// ---------- 持久化存储（文件版，跨软件更新不丢；替代 file:// 下不可靠的 localStorage）----------
+const STORE_FILE = path.join(app.getPath('userData'), 'neko-store.json')
+let persistStore = {}
+try {
+  if (existsSync(STORE_FILE)) persistStore = JSON.parse(readFileSync(STORE_FILE, 'utf-8'))
+} catch {
+  persistStore = {}
+}
+let storeWriteTimer = null
+function flushStore() {
+  storeWriteTimer = null
+  try {
+    writeFileSync(STORE_FILE, JSON.stringify(persistStore))
+  } catch (e) {
+    console.error('[store] 写入失败：', e.message)
+  }
+}
+function scheduleFlush() {
+  if (storeWriteTimer) clearTimeout(storeWriteTimer)
+  storeWriteTimer = setTimeout(flushStore, 150) // 合并连续写入，减少磁盘 IO
+}
+ipcMain.on('store-get', (e, key) => {
+  e.returnValue = persistStore[key] ?? null
+})
+ipcMain.on('store-set', (_e, { key, val }) => {
+  persistStore[key] = val
+  scheduleFlush()
+})
+ipcMain.on('store-remove', (_e, key) => {
+  delete persistStore[key]
+  scheduleFlush()
+})
 
 // 软件自带的 mpv 可执行路径（CI 打包时下载到 electron/mpv 内；打包后在 resources/mpv）
 function bundledMpv() {
@@ -312,6 +345,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('quit', () => {
+  if (storeWriteTimer) flushStore() // 落盘未写完的存储
   if (mpvProc) {
     try {
       mpvProc.kill()

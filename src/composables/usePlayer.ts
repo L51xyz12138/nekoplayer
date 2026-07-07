@@ -158,19 +158,36 @@ async function loadStream(item: MediaItem, episode?: Episode) {
   }
 }
 
+/**
+ * 剧集续播目标集，多路兜底：
+ * 1) nextUp（Emby Resume/NextUp 按最近活动算出的续看点，最准——避免选到早期的旧半看集）
+ * 2) 有进度的集（0<progress<1） 3) 第一个没看过的集 4) 第一集
+ */
+function resumeEpisodeOf(item: MediaItem): Episode | undefined {
+  const eps = item.seasons?.flatMap((s) => s.episodes) ?? []
+  if (!eps.length) return undefined
+  if (item.nextUp) {
+    const byNextUp = eps.find((e) => e.id === item.nextUp!.episodeId)
+    if (byNextUp) return byNextUp
+  }
+  return (
+    eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ||
+    eps.find((e) => !e.watched) ||
+    eps[0]
+  )
+}
+
 // 剧集未指定集时：确保季集已加载，再播「续看的那集/第一集」
 async function playSeriesResume(item: MediaItem, player: string) {
   const { loadSeasons } = useLibrary()
   if (!item.seasons) await loadSeasons(item.id)
-  const eps = item.seasons?.flatMap((s) => s.episodes) ?? []
-  const resume = eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ?? eps[0]
+  const resume = resumeEpisodeOf(item)
   if (resume) playWith(item, resume, player)
 }
 
 function play(item: MediaItem, episode?: Episode) {
   // Electron：交给外部播放器（按设置的默认播放器）
-  const isElectron = !!(window as unknown as { nekoNative?: { playMpv?: unknown } }).nekoNative
-    ?.playMpv
+  const isElectron = !!window.nekoNative?.playMpv
   if (isElectron) {
     const player = useSettings().settings.playerMode
     if (item.type === 'series' && !episode) void playSeriesResume(item, player)
@@ -200,33 +217,7 @@ function play(item: MediaItem, episode?: Episode) {
 /** 直接用 IINA 打开播放（外部播放器） */
 /** 用指定播放器播放（mpv/IINA/VLC/Infuse/PotPlayer）；剧集带整季播放列表 */
 function playWith(item: MediaItem, episode: Episode | undefined, player: string) {
-  const native = (
-    window as unknown as {
-      nekoNative?: {
-        playMpv?: (
-          items: { url: string; title: string }[],
-          title: string,
-          startIndex?: number,
-          mpvPath?: string,
-          startSec?: number,
-          emby?: {
-            serverUrl: string
-            token: string
-            userId: string
-            deviceId: string
-            itemId: string
-            playSessionId: string
-          }
-        ) => Promise<boolean>
-        playExternal?: (
-          p: string,
-          u: string,
-          appPath?: string,
-          startSec?: number
-        ) => Promise<boolean>
-      }
-    }
-  ).nekoNative
+  const native = window.nekoNative
   const s = useSources().sessionOf(item.sourceId)
   if (!native?.playMpv || !s) return
   const { settings } = useSettings()
@@ -242,9 +233,16 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
   const startAt = startIdx >= 0 ? startIdx : 0
   const targetIds = queue.length ? queue.map((e) => e.id) : [targetId]
 
-  // 从上次的播放进度续播（progress 0~1 × 时长分钟 → 秒）
+  // 续播秒数：续看集优先用 nextUp（Resume 端点）的可靠位置——getEpisodes 在部分魔改 Emby 上不返回每集位置
   const startItem = queue.length ? queue[startAt] : (episode ?? item)
-  const startSec = Math.floor((startItem.progress ?? 0) * (startItem.runtime || 0) * 60)
+  const nu = item.nextUp
+  const useNu = !!nu && startItem.id === nu.episodeId
+  const posTicks = (useNu ? nu!.positionTicks : startItem.positionTicks) ?? 0
+  const prog = (useNu ? nu!.progress : startItem.progress) ?? 0
+  const startSec =
+    posTicks > 0
+      ? Math.floor(posTicks / 10_000_000)
+      : Math.floor(prog * (startItem.runtime || 0) * 60)
 
   Promise.all(targetIds.map((id) => getMpvPlayback(s, id)))
     .then((infos) => {
@@ -370,6 +368,7 @@ export function usePlayer() {
     ...toRefs(state),
     title,
     subtitleLine,
+    resumeEpisodeOf,
     hasPrev,
     hasNext,
     play,

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
 import type { Episode, Season } from '@/types/media'
 
-const props = defineProps<{ seasons: Season[] }>()
+const props = defineProps<{ seasons: Season[]; resumeId?: string }>()
 const emit = defineEmits<{ play: [ep: Episode] }>()
 
 const active = ref(props.seasons[0]?.season ?? 1)
@@ -18,6 +18,28 @@ function scroll(dir: number) {
   if (!el) return
   el.scrollBy({ left: dir * el.clientWidth * 0.82, behavior: 'smooth' })
 }
+
+// 定位续看集：切到它所在季，并横向滚动到该集
+function seasonOfEp(id?: string): number | undefined {
+  if (!id) return undefined
+  return props.seasons.find((s) => s.episodes.some((e) => e.id === id))?.season
+}
+function scrollToResume() {
+  if (!props.resumeId) return
+  const node = track.value?.querySelector<HTMLElement>(
+    `[data-ep-id="${CSS.escape(props.resumeId)}"]`
+  )
+  node?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+}
+watch(
+  () => props.resumeId,
+  (id) => {
+    const sea = seasonOfEp(id)
+    if (sea != null) active.value = sea
+    nextTick(scrollToResume)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -44,12 +66,20 @@ function scroll(dir: number) {
     </div>
 
     <div ref="track" class="eps__track no-scrollbar">
-      <article v-for="ep in current.episodes" :key="ep.id" class="ep" @click="emit('play', ep)">
+      <article
+        v-for="ep in current.episodes"
+        :key="ep.id"
+        class="ep"
+        :class="{ resuming: ep.id === resumeId }"
+        :data-ep-id="ep.id"
+        @click="emit('play', ep)"
+      >
         <div class="ep__thumb">
           <PosterImage :seed="ep.stillSeed" :src="ep.stillUrl" kind="still" />
           <div class="ep__scrim" />
           <button class="ep__play"><Play :size="18" fill="currentColor" /></button>
-          <span class="ep__badge">第 {{ ep.episode }} 集</span>
+          <span v-if="ep.id === resumeId" class="ep__badge ep__badge--resume">续看</span>
+          <span v-else class="ep__badge">第 {{ ep.episode }} 集</span>
           <span class="ep__dur">{{ ep.runtime }} 分钟</span>
           <div v-if="ep.progress" class="ep__bar"><span :style="{ width: ep.progress * 100 + '%' }" /></div>
         </div>
@@ -147,6 +177,14 @@ function scroll(dir: number) {
 .ep:hover .ep__thumb {
   transform: translateY(-4px);
   box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+/* 续看集：常驻强调色描边 */
+.ep.resuming .ep__thumb {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.ep__badge--resume {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 .ep__scrim {
   position: absolute;

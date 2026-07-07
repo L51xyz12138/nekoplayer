@@ -7,26 +7,33 @@ import type { MediaItem } from '@/types/media'
 const props = defineProps<{ item: MediaItem }>()
 const emit = defineEmits<{ play: [item: MediaItem] }>()
 
-const remain = computed(() => Math.round(props.item.runtime * (1 - (props.item.progress ?? 0))))
+// 剧集用 NextUp 的下一集信息；电影用自身进度
+const nextUp = computed(() => props.item.nextUp)
+const progress = computed(() => nextUp.value?.progress ?? props.item.progress ?? 0)
+const still = computed(() => nextUp.value?.stillUrl || props.item.backdropUrl)
+const remain = computed(() => Math.round(props.item.runtime * (1 - progress.value)))
+const info = computed(() =>
+  nextUp.value
+    ? `S${nextUp.value.season}E${nextUp.value.episode} · ${nextUp.value.title}`
+    : `剩余 ${remain.value} 分钟`
+)
 </script>
 
 <template>
   <article class="cc" @click="emit('play', item)">
     <div class="cc__thumb">
-      <PosterImage :seed="item.id" :src="item.backdropUrl" kind="backdrop" />
+      <PosterImage :seed="nextUp?.episodeId ?? item.id" :src="still" kind="backdrop" />
       <div class="cc__scrim" />
       <button class="cc__play" title="继续播放">
         <Play :size="22" fill="currentColor" />
       </button>
-      <div class="cc__bar">
-        <span :style="{ width: (item.progress ?? 0) * 100 + '%' }" />
+      <div v-if="progress > 0" class="cc__bar">
+        <span :style="{ width: progress * 100 + '%' }" />
       </div>
     </div>
     <div class="cc__meta">
       <h3 class="cc__title">{{ item.title }}</h3>
-      <p class="cc__info">
-        {{ item.type === 'series' ? '第 1 季 · ' : '' }}剩余 {{ remain }} 分钟
-      </p>
+      <p class="cc__info">{{ info }}</p>
     </div>
   </article>
 </template>

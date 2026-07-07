@@ -1,8 +1,25 @@
 import { computed, reactive, toRefs } from 'vue'
-import { getEpisodes, getItems, setFavorite } from '@/api/emby'
-import { mapEmbyItem, mapEpisodes } from '@/api/mapper'
+import { getEpisodes, getItems, getNextUp, getResume, setFavorite, setPlayed } from '@/api/emby'
+import { mapEmbyItem, mapEpisodes, mapNextUp } from '@/api/mapper'
 import { useSources } from './useSources'
+import { pget, pset } from './persist'
 import type { LibraryCategory, MediaItem, SortMode } from '@/types/media'
+
+// 上次成功加载的媒体库缓存：启动先渲染它，再后台刷新（stale-while-revalidate）
+const CACHE_KEY = 'neko-library-cache'
+
+function loadCache(): MediaItem[] {
+  try {
+    const raw = pget(CACHE_KEY)
+    return raw ? (JSON.parse(raw) as MediaItem[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveCache(items: MediaItem[]) {
+  pset(CACHE_KEY, JSON.stringify(items))
+}
 
 interface LibraryState {
   items: MediaItem[]
@@ -17,9 +34,9 @@ interface LibraryState {
   loaded: boolean
 }
 
-// 模块级单例：全应用共享同一份库状态（纯真实数据）
+// 模块级单例：全应用共享同一份库状态（启动即用缓存填充，保证首屏秒开）
 const state = reactive<LibraryState>({
-  items: [],
+  items: loadCache(),
   query: '',
   category: 'all',
   sort: 'recent',
@@ -75,10 +92,15 @@ const filtered = computed(() => {
   return list
 })
 
+// 继续观看：电影看自身进度；剧集看 nextUp（Resume/NextUp）。按最近播放时间倒序
 const continueWatching = computed(() =>
   scoped.value
-    .filter((m) => (m.progress ?? 0) > 0 && (m.progress ?? 0) < 1)
-    .sort((a, b) => b.addedAt - a.addedAt)
+    .filter((m) =>
+      m.type === 'series'
+        ? !!m.nextUp
+        : (m.progress ?? 0) > 0 && (m.progress ?? 0) < 1
+    )
+    .sort((a, b) => (b.lastPlayed ?? b.addedAt) - (a.lastPlayed ?? a.addedAt))
 )
 
 const recentlyAdded = computed(() =>
@@ -108,6 +130,26 @@ function toggleFavorite(id: string) {
       console.warn('[NekoPlayer] 收藏同步失败：', e)
     )
   }
+  saveCache(state.items)
+}
+
+/** 标记已看 / 取消已看（乐观更新 + 回写服务器） */
+function toggleWatched(id: string) {
+  const m = getById(id)
+  if (!m) return
+  m.watched = !m.watched
+  // 标记已看：清掉进度与下一集待看，使其移出「继续观看」
+  if (m.watched) {
+    m.progress = undefined
+    m.nextUp = undefined
+  }
+  const s = useSources().sessionOf(m.sourceId)
+  if (s) {
+    setPlayed(s, id, m.watched).catch((e) =>
+      console.warn('[NekoPlayer] 已看状态同步失败：', e)
+    )
+  }
+  saveCache(state.items)
 }
 
 function updateProgress(id: string, progress: number) {
@@ -132,6 +174,7 @@ function clearLibrary() {
   state.items = []
   state.loaded = false
   state.activeSourceId = 'all'
+  saveCache([])
 }
 
 /** 从真实 Emby 拉取媒体库 */
@@ -142,6 +185,7 @@ async function loadFromEmby() {
   if (!embySources.length) {
     state.items = []
     state.loaded = false
+    saveCache([])
     return
   }
 
@@ -152,16 +196,56 @@ async function loadFromEmby() {
     const groups = await Promise.all(
       embySources.map(async (src) => {
         try {
-          const items = await getItems(src.session!)
-          return items.map((it) => mapEmbyItem(it, src.session!))
+          // 同时拉媒体列表、「下一集待看」、「继续观看」，用 SeriesId 把续看集挂到对应剧集上
+          const [items, nextUps, resumes] = await Promise.all([
+            getItems(src.session!),
+            getNextUp(src.session!).catch(() => []),
+            getResume(src.session!).catch(() => [])
+          ])
+          const mapped = items.map((it) => mapEmbyItem(it, src.session!))
+          const byId = new Map(mapped.map((m) => [m.id, m]))
+          // 端点已按最近活动排序：用其顺序赋「最近播放」时间戳
+          // （魔改 Emby 常不给 LastPlayedDate，用排名兜底，rank 越小越近）
+          const now = Date.now()
+          const stamp = (m: MediaItem, lp: string | undefined, rank: number) => {
+            if (m.lastPlayed != null) return
+            m.lastPlayed = lp ? Date.parse(lp) : now - rank * 60_000
+          }
+          // Resume：正在看的电影/分集（最近在前）；剧集取最新一集作续看点
+          resumes.forEach((e, i) => {
+            const target =
+              e.Type === 'Episode' ? (e.SeriesId ? byId.get(e.SeriesId) : undefined) : byId.get(e.Id)
+            if (!target) return
+            if (e.Type === 'Episode' && !target.nextUp) target.nextUp = mapNextUp(e, src.session!)
+            stamp(target, e.UserData?.LastPlayedDate, i)
+          })
+          // NextUp：补「没有正在看的集」的剧（追完当前集 → 下一集），排在 Resume 之后
+          nextUps.forEach((e, i) => {
+            const series = e.SeriesId ? byId.get(e.SeriesId) : undefined
+            if (!series || series.nextUp) return
+            series.nextUp = mapNextUp(e, src.session!)
+            stamp(series, e.UserData?.LastPlayedDate, resumes.length + i)
+          })
+          return mapped
         } catch (e) {
           console.warn('[NekoPlayer] 媒体源加载失败：', src.name, e)
           return [] as MediaItem[]
         }
       })
     )
-    state.items = groups.flat()
+    // 保留已懒加载的季/集：loadFromEmby 只拉列表不含 seasons，替换 items 时
+    // 若不迁移，正在看的详情页会因新 item 无 seasons 而丢失剧集列表
+    const prevSeasons = new Map(
+      state.items.filter((m) => m.seasons).map((m) => [m.id, m.seasons])
+    )
+    const next = groups.flat()
+    for (const m of next) {
+      const sea = prevSeasons.get(m.id)
+      if (sea) m.seasons = sea
+    }
+    state.items = next
     state.loaded = true
+    saveCache(state.items)
   } catch (e) {
     state.error = e instanceof Error ? e.message : '媒体库加载失败'
   } finally {
@@ -196,6 +280,7 @@ export function useLibrary() {
     featured,
     getById,
     toggleFavorite,
+    toggleWatched,
     updateProgress,
     setQuery,
     setCategory,

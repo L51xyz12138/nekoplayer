@@ -3,7 +3,7 @@
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
-const APP_VERSION = '0.1.2'
+const APP_VERSION = '0.1.3'
 
 function getDeviceId(): string {
   const KEY = 'neko-device-id'
@@ -92,9 +92,13 @@ export interface EmbyItem {
     PlayedPercentage?: number
     Played?: boolean
     PlaybackPositionTicks?: number
+    /** 最近一次播放时间（ISO 字符串），用于「继续观看」按最近排序 */
+    LastPlayedDate?: string
   }
   IndexNumber?: number
   ParentIndexNumber?: number
+  /** 分集所属剧集 id（NextUp 返回的分集带此字段） */
+  SeriesId?: string
 }
 
 export interface EmbyPlaybackSource {
@@ -174,11 +178,39 @@ export async function getItem(session: EmbySession, itemId: string): Promise<Emb
   return res.json() as Promise<EmbyItem>
 }
 
+/** 拉取「下一集待看」（每部在追剧集的下一集，Emby 已按最近活动排序） */
+export async function getNextUp(session: EmbySession, limit = 40): Promise<EmbyItem[]> {
+  const q = new URLSearchParams({
+    UserId: session.userId,
+    Limit: String(limit),
+    Fields: 'RunTimeTicks,UserData,SeriesId'
+  })
+  const res = await request(session.serverUrl, `/Shows/NextUp?${q}`, session.token)
+  const data = await res.json()
+  return (data.Items ?? []) as EmbyItem[]
+}
+
+/** 拉取「继续观看」（有播放进度的电影/分集，Emby 按最近活动排序）——比 NextUp 更准地反映「正在看的那一集」 */
+export async function getResume(session: EmbySession, limit = 40): Promise<EmbyItem[]> {
+  const q = new URLSearchParams({
+    Limit: String(limit),
+    MediaTypes: 'Video',
+    Fields: 'RunTimeTicks,UserData,SeriesId'
+  })
+  const res = await request(
+    session.serverUrl,
+    `/Users/${session.userId}/Items/Resume?${q}`,
+    session.token
+  )
+  const data = await res.json()
+  return (data.Items ?? []) as EmbyItem[]
+}
+
 /** 拉取剧集的全部分集 */
 export async function getEpisodes(session: EmbySession, seriesId: string): Promise<EmbyItem[]> {
   const q = new URLSearchParams({
     UserId: session.userId,
-    Fields: 'Overview,RunTimeTicks,MediaSources,MediaStreams'
+    Fields: 'Overview,RunTimeTicks,MediaSources,MediaStreams,UserData'
   })
   const res = await request(session.serverUrl, `/Shows/${seriesId}/Episodes?${q}`, session.token)
   const data = await res.json()
@@ -301,6 +333,17 @@ export async function setFavorite(
 ): Promise<void> {
   await request(session.serverUrl, `/Users/${session.userId}/FavoriteItems/${itemId}`, session.token, {
     method: favorite ? 'POST' : 'DELETE'
+  })
+}
+
+/** 标记已看 / 取消已看（写回服务器） */
+export async function setPlayed(
+  session: EmbySession,
+  itemId: string,
+  played: boolean
+): Promise<void> {
+  await request(session.serverUrl, `/Users/${session.userId}/PlayedItems/${itemId}`, session.token, {
+    method: played ? 'POST' : 'DELETE'
   })
 }
 

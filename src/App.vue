@@ -14,9 +14,7 @@ useSettings()
 onMounted(() => {
   loadFromEmby()
   // 外部播放器结束后，主进程通知前端刷新，更新最新播放进度
-  const nn = (window as unknown as { nekoNative?: { onPlaybackEnded?: (cb: () => void) => void } })
-    .nekoNative
-  nn?.onPlaybackEnded?.(() => loadFromEmby())
+  window.nekoNative?.onPlaybackEnded(() => loadFromEmby())
 })
 </script>
 
