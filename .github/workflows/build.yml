@@ -97,11 +97,17 @@ jobs:
             release/*.deb
           if-no-files-found: ignore
 
-      # 打了 v* 标签时，把三平台安装包发布到 GitHub Release（供任何人下载）
+      # 打了 v* 标签时，从 CHANGELOG 提取该版本更新说明
+      - name: Prepare release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/extract-changelog.mjs ${{ github.ref_name }}
+
+      # 把三平台安装包 + 更新说明发布到 GitHub Release
       - name: Publish to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             release/*.dmg
             release/*.zip
