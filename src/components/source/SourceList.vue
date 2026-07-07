@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Server, Pencil, Trash2 } from 'lucide-vue-next'
-import { sourceKindMeta } from '@/data/mockSources'
+import { sourceKindMeta } from '@/data/sourceKinds'
 import type { MediaSource } from '@/types/source'
 
 defineProps<{ sources: MediaSource[] }>()

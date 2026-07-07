@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { X, Server, Eye, EyeOff } from 'lucide-vue-next'
-import { sourceKinds, sourceKindMeta } from '@/data/mockSources'
+import { sourceKinds, sourceKindMeta } from '@/data/sourceKinds'
 import { useEmby } from '@/composables/useEmby'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'

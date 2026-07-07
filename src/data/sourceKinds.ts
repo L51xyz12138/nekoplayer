@@ -1,4 +1,4 @@
-import type { MediaSource, SourceKind, SourceKindMeta } from '@/types/source'
+import type { SourceKind, SourceKindMeta } from '@/types/source'
 
 const serverFields = (defaultPort: string): SourceKindMeta['fields'] => [
   { key: 'address', label: '服务器地址', placeholder: 'http://192.168.1.10', type: 'text', required: true },
@@ -37,6 +37,3 @@ export const sourceKinds: SourceKindMeta[] = [
 export function sourceKindMeta(kind: SourceKind): SourceKindMeta {
   return sourceKinds.find((k) => k.kind === kind) ?? sourceKinds[0]
 }
-
-// 演示媒体源已移除——真实连接由 useEmby / useSources 管理
-export const mockSources: MediaSource[] = []
