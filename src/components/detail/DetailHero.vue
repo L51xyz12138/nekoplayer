@@ -1,12 +1,29 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Play, Heart, Check, ExternalLink } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import MetaBar from './MetaBar.vue'
 import type { MediaItem } from '@/types/media'
 
-defineProps<{ item: MediaItem }>()
+const props = defineProps<{ item: MediaItem }>()
 const emit = defineEmits<{ play: []; favorite: []; 'play-with': [player: string] }>()
+
+// 播放进度：电影用自身进度；剧集用「续看的那一集」的进度
+const resumeEp = computed(() => {
+  if (props.item.type !== 'series') return null
+  const eps = props.item.seasons?.flatMap((s) => s.episodes) ?? []
+  return eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ?? null
+})
+const progressPct = computed(() => {
+  const p = props.item.type === 'series' ? resumeEp.value?.progress : props.item.progress
+  return p ? Math.round(p * 100) : 0
+})
+const progressText = computed(() =>
+  resumeEp.value
+    ? `续看 S${resumeEp.value.season}E${resumeEp.value.episode} · ${progressPct.value}%`
+    : `已观看 ${progressPct.value}%`
+)
 
 // 当前平台可用的播放器（仅 Electron 显示快捷按钮）
 const nn = (window as unknown as { nekoNative?: { platform?: string; playMpv?: unknown } }).nekoNative
@@ -50,6 +67,11 @@ const players: string[] = nn?.playMpv
         </div>
 
         <p class="dhero__overview clamp-3">{{ item.overview }}</p>
+
+        <div v-if="progressPct > 0" class="dhero__progress">
+          <div class="dhero__progress-track"><span :style="{ width: progressPct + '%' }" /></div>
+          <span class="dhero__progress-text">{{ progressText }}</span>
+        </div>
 
         <div class="dhero__actions">
           <IconButton variant="solid" label="播放" @click="emit('play')">
@@ -159,6 +181,32 @@ const players: string[] = nn?.playMpv
   font-size: 15px;
   line-height: 1.65;
   color: var(--text-dim);
+}
+.dhero__progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  max-width: 460px;
+}
+.dhero__progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.dhero__progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.dhero__progress-text {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 .dhero__actions {
   display: flex;

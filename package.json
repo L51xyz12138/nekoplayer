@@ -1,9 +1,9 @@
 {
   "name": "nekoplayer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
-  "description": "Infuse 风格的跨平台媒体播放器",
+  "description": "跨平台媒体播放器",
   "author": {
     "name": "浮浮酱",
     "email": "szyw6yknyn@privaterelay.appleid.com"

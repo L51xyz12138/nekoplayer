@@ -17,6 +17,7 @@ export const themes: ThemePreset[] = [
 
 interface Settings {
   themeIndex: number
+  colorScheme: string
   playerMode: string
   playerPaths: Record<string, string>
   quality: string | number
@@ -30,6 +31,7 @@ interface Settings {
 
 const DEFAULTS: Settings = {
   themeIndex: 0,
+  colorScheme: '跟随系统',
   playerMode: 'mpv',
   playerPaths: {},
   quality: '自动',
@@ -64,19 +66,34 @@ export function applyTheme(index: number) {
   r.setProperty('--accent-glow', t.c1 + '66')
 }
 
-// 启动即应用已保存主题
-applyTheme(settings.themeIndex)
+const prefersLight = window.matchMedia('(prefers-color-scheme: light)')
 
-// 任何设置变更：持久化 + 主题即时应用
+/** 应用亮/暗背景：亮色 / 暗色 / 跟随系统 */
+export function applyScheme(mode: string) {
+  const light = mode === '亮色' || (mode === '跟随系统' && prefersLight.matches)
+  document.documentElement.dataset.scheme = light ? 'light' : 'dark'
+}
+
+// 启动即应用已保存的主题与背景
+applyTheme(settings.themeIndex)
+applyScheme(settings.colorScheme)
+
+// 跟随系统时，系统亮/暗切换实时生效
+prefersLight.addEventListener('change', () => {
+  if (settings.colorScheme === '跟随系统') applyScheme('跟随系统')
+})
+
+// 任何设置变更：持久化 + 即时应用
 watch(
   settings,
   () => {
     localStorage.setItem(KEY, JSON.stringify(settings))
     applyTheme(settings.themeIndex)
+    applyScheme(settings.colorScheme)
   },
   { deep: true }
 )
 
 export function useSettings() {
-  return { settings, themes, applyTheme }
+  return { settings, themes, applyTheme, applyScheme }
 }

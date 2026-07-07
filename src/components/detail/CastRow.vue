@@ -3,12 +3,19 @@ import PosterImage from '@/components/common/PosterImage.vue'
 import type { Person } from '@/types/media'
 
 defineProps<{ title: string; people: Person[] }>()
+
+// 鼠标滚轮纵向 → 横向滚动，方便看完整演职人员
+function onWheel(e: WheelEvent) {
+  if (e.deltaY === 0) return
+  e.preventDefault()
+  ;(e.currentTarget as HTMLElement).scrollLeft += e.deltaY
+}
 </script>
 
 <template>
   <section class="cast">
     <h2 class="cast__title">{{ title }}</h2>
-    <div class="cast__track no-scrollbar">
+    <div class="cast__track no-scrollbar" @wheel="onWheel">
       <div v-for="p in people" :key="p.id" class="person">
         <div class="person__avatar">
           <PosterImage :seed="p.name" :title="p.name" :src="p.avatarUrl" kind="avatar" />

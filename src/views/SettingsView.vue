@@ -60,6 +60,10 @@ const currentPlayerPath = computed({
               </button>
             </div>
           </div>
+          <div class="row">
+            <div class="row__label"><h4>背景主题</h4><p>暗色 / 亮色 / 跟随系统</p></div>
+            <Segmented v-model="settings.colorScheme" :options="['跟随系统', '暗色', '亮色']" />
+          </div>
         </div>
       </section>
 
@@ -137,7 +141,7 @@ const currentPlayerPath = computed({
           <div class="about__logo">ネ</div>
           <div class="about__info">
             <h3>NekoPlayer <span>v0.1.0 · 开发中</span></h3>
-            <p>Infuse 风格的媒体播放器 · 已接入真实 Emby</p>
+            <p>跨平台媒体播放器 · 已接入真实 Emby</p>
             <p class="about__stack">Vue 3 · Vite · TypeScript · 由浮浮酱精心打造 ฅ'ω'ฅ</p>
           </div>
         </div>

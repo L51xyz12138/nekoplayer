@@ -39,3 +39,20 @@
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --dur: 0.22s;
 }
+
+/* 亮色背景（背景主题=亮色，或跟随系统且系统为浅色时） */
+:root[data-scheme='light'] {
+  --bg-0: #e9edf4;
+  --bg-1: #f5f7fb;
+  --bg-2: #ffffff;
+  --surface: rgba(18, 22, 33, 0.045);
+  --surface-2: rgba(18, 22, 33, 0.07);
+  --surface-hover: rgba(18, 22, 33, 0.1);
+  --border: rgba(18, 22, 33, 0.1);
+  --border-strong: rgba(18, 22, 33, 0.18);
+  --text: #1a1e28;
+  --text-dim: #48505f;
+  --text-mute: #868f9f;
+  --shadow-card: 0 14px 34px rgba(20, 30, 60, 0.12);
+  --shadow-pop: 0 28px 70px rgba(20, 30, 60, 0.18);
+}

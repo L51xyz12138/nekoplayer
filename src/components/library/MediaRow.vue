@@ -75,7 +75,9 @@ function scroll(dir: number) {
   grid-auto-columns: var(--col);
   gap: 18px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  /* 上下留白，避免卡片 hover 上移/放大被裁剪 */
+  padding: 8px 0 6px;
+  margin-top: -8px;
   scroll-snap-type: x proximity;
 }
 .row__track > :deep(*) {

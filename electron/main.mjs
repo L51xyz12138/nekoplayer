@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
+import net from 'node:net'
 import { existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -14,6 +15,7 @@ const MPV_CONFIG_DIR = app.isPackaged
   : path.join(__dirname, 'mpv')
 
 let mpvProc = null
+let mainWin = null
 
 // 软件自带的 mpv 可执行路径（CI 打包时下载到 electron/mpv 内；打包后在 resources/mpv）
 function bundledMpv() {
@@ -44,9 +46,103 @@ function resolveMpv(customPath) {
   return process.platform === 'win32' ? 'mpv.exe' : 'mpv'
 }
 
+// 通过 mpv IPC 跟踪播放位置，退出时把进度回传给 Emby（外部播放器无法自己上报）
+function trackMpvProgress(socketPath, emby) {
+  let lastPos = 0
+  let attempts = 0
+  const connect = () => {
+    const sock = net.connect(socketPath)
+    sock.on('connect', () => {
+      console.log('[mpv] IPC 已连接')
+      const timer = setInterval(() => {
+        try {
+          sock.write(JSON.stringify({ command: ['get_property', 'time-pos'] }) + '\n')
+        } catch {
+          /* ignore */
+        }
+        if (lastPos > 0) reportMpvProgress(emby, lastPos)
+      }, 3000)
+      let buf = ''
+      sock.on('data', (chunk) => {
+        buf += chunk.toString()
+        let i
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i)
+          buf = buf.slice(i + 1)
+          try {
+            const msg = JSON.parse(line)
+            if (msg.error === 'success' && typeof msg.data === 'number') lastPos = msg.data
+          } catch {
+            /* ignore */
+          }
+        }
+      })
+      sock.on('close', () => {
+        clearInterval(timer)
+        reportMpvStopped(emby, lastPos)
+        // 延迟一下等 Emby 处理完 Stopped，再通知前端刷新，拉到最新进度
+        setTimeout(() => {
+          if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('playback-ended')
+        }, 1000)
+      })
+    })
+    sock.on('error', (e) => {
+      if (++attempts < 20) setTimeout(connect, 400)
+      else console.error('[mpv] IPC 连不上：', e.message)
+    })
+  }
+  connect()
+}
+
+async function reportMpvStopped(emby, posSeconds) {
+  console.log('[mpv] 退出，回传进度：', Math.round(posSeconds), '秒 itemId=', emby?.itemId)
+  if (!emby || !emby.serverUrl || !emby.token || !emby.itemId || posSeconds <= 0) return
+  try {
+    // authHeader 带上与开始播放一致的 DeviceId，Emby 才能把进度更新到同一会话
+    const res = await fetch(`${emby.serverUrl}/Sessions/Playing/Stopped`, {
+      method: 'POST',
+      headers: {
+        'X-Emby-Authorization': `MediaBrowser Client="NekoPlayer", Device="NekoPlayer", DeviceId="${emby.deviceId || ''}", Version="0.1.1", Token="${emby.token}"`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ItemId: emby.itemId,
+        PositionTicks: Math.round(posSeconds * 10_000_000),
+        PlaySessionId: emby.playSessionId || ''
+      })
+    })
+    console.log('[mpv] 停止回传响应：', res.status)
+  } catch (err) {
+    console.error('[mpv] 进度回传失败：', err.message)
+  }
+}
+
+// 播放中定期上报进度（很多 Emby 靠 Progress 而非 Stopped 更新 UserData 进度）
+async function reportMpvProgress(emby, posSeconds) {
+  if (!emby || !emby.serverUrl || !emby.token || !emby.itemId || posSeconds <= 0) return
+  try {
+    await fetch(`${emby.serverUrl}/Sessions/Playing/Progress`, {
+      method: 'POST',
+      headers: {
+        'X-Emby-Authorization': `MediaBrowser Client="NekoPlayer", Device="NekoPlayer", DeviceId="${emby.deviceId || ''}", Version="0.1.1", Token="${emby.token}"`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ItemId: emby.itemId,
+        PositionTicks: Math.round(posSeconds * 10_000_000),
+        PlaySessionId: emby.playSessionId || '',
+        IsPaused: false,
+        EventName: 'timeupdate'
+      })
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
 // 渲染进程请求用 mpv 播放（items: [{ url, title }]）
 ipcMain.handle('play-mpv', (_e, payload) => {
-  const { items, title, startIndex, mpvPath } = payload || {}
+  const { items, title, startIndex, mpvPath, startSec, emby } = payload || {}
   const list = Array.isArray(items) ? items : []
   if (!list.length) return false
 
@@ -59,6 +155,12 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     mpvProc = null
   }
 
+  // IPC socket：运行时读取播放进度，退出时回传 Emby
+  const ipcSocket =
+    process.platform === 'win32'
+      ? `\\\\.\\pipe\\nekompv${Date.now()}`
+      : path.join(tmpdir(), `nekompv-${Date.now()}.sock`)
+
   const args = [
     `--title=${title || 'NekoPlayer'}`,
     '--force-window=yes',
@@ -66,8 +168,11 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     '--hwdec=auto',
     '--autofit-larger=90%x90%',
     '--geometry=50%:50%',
-    `--config-dir=${MPV_CONFIG_DIR}`
+    `--config-dir=${MPV_CONFIG_DIR}`,
+    `--input-ipc-server=${ipcSocket}`
   ]
+  // 从上次进度续播
+  if (typeof startSec === 'number' && startSec > 0) args.push(`--start=${startSec}`)
 
   let target
   if (list.length === 1) {
@@ -102,6 +207,12 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     proc.on('exit', () => {
       if (mpvProc === proc) mpvProc = null
     })
+    if (emby) {
+      console.log('[mpv] 启用进度跟踪，socket=', ipcSocket, 'itemId=', emby.itemId)
+      trackMpvProgress(ipcSocket, emby)
+    } else {
+      console.log('[mpv] 未收到 emby 信息，跳过进度跟踪')
+    }
     return true
   } catch (err) {
     console.error('[mpv] spawn 异常：', err)
@@ -111,16 +222,17 @@ ipcMain.handle('play-mpv', (_e, payload) => {
 })
 
 // 唤起系统外部播放器（各平台，支持自定义程序路径）
-function openExternal(player, url, customPath) {
+function openExternal(player, url, customPath, startSec) {
+  const seek = typeof startSec === 'number' && startSec > 0 ? startSec : 0
   try {
     if (process.platform === 'darwin') {
       const appMap = { iina: 'IINA', vlc: 'VLC', infuse: 'Infuse' }
       if (customPath) {
-        // IINA：用 .app 内的 iina-cli 精确调用，绕过 LaunchServices（避免打开同 bundleId 的 debug 版）
+        // IINA：用 .app 内的 iina-cli 精确调用（可传 --mpv-start 续播），绕过 LaunchServices
         if (player === 'iina') {
           const cli = path.join(customPath, 'Contents/MacOS/iina-cli')
           if (existsSync(cli)) {
-            spawn(cli, [url], { stdio: 'ignore' })
+            spawn(cli, seek ? [`--mpv-start=${seek}`, url] : [url], { stdio: 'ignore' })
             return true
           }
         }
@@ -137,12 +249,12 @@ function openExternal(player, url, customPath) {
         'C:/Program Files (x86)/DAUM/PotPlayer/PotPlayerMini.exe'
       ].filter(Boolean)
       const bin = candidates.find((p) => existsSync(p)) || 'potplayer'
-      spawn(bin, [url], { stdio: 'ignore' })
+      spawn(bin, seek ? [url, `/seek=${seek}`] : [url], { stdio: 'ignore' })
       return true
     }
     if (process.platform === 'linux' && player === 'vlc') {
       const bin = customPath && existsSync(customPath) ? customPath : 'vlc'
-      spawn(bin, [url], { stdio: 'ignore' })
+      spawn(bin, seek ? [`--start-time=${seek}`, url] : [url], { stdio: 'ignore' })
       return true
     }
     // 兜底：交给系统默认程序打开
@@ -157,9 +269,9 @@ function openExternal(player, url, customPath) {
 }
 
 ipcMain.handle('play-external', (_e, payload) => {
-  const { player, url, appPath } = payload || {}
+  const { player, url, appPath, startSec } = payload || {}
   if (!url) return false
-  return openExternal(player, url, appPath)
+  return openExternal(player, url, appPath, startSec)
 })
 
 function createWindow() {
@@ -185,6 +297,7 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+  mainWin = win
 }
 
 app.whenReady().then(() => {

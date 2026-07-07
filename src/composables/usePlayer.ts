@@ -6,6 +6,7 @@ import {
   reportPlaybackStopped,
   resolvePlaybackUrl
 } from '@/api/emby'
+import { useLibrary } from './useLibrary'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import type { Episode, MediaItem } from '@/types/media'
@@ -157,12 +158,23 @@ async function loadStream(item: MediaItem, episode?: Episode) {
   }
 }
 
+// 剧集未指定集时：确保季集已加载，再播「续看的那集/第一集」
+async function playSeriesResume(item: MediaItem, player: string) {
+  const { loadSeasons } = useLibrary()
+  if (!item.seasons) await loadSeasons(item.id)
+  const eps = item.seasons?.flatMap((s) => s.episodes) ?? []
+  const resume = eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ?? eps[0]
+  if (resume) playWith(item, resume, player)
+}
+
 function play(item: MediaItem, episode?: Episode) {
   // Electron：交给外部播放器（按设置的默认播放器）
   const isElectron = !!(window as unknown as { nekoNative?: { playMpv?: unknown } }).nekoNative
     ?.playMpv
   if (isElectron) {
-    playWith(item, episode, useSettings().settings.playerMode)
+    const player = useSettings().settings.playerMode
+    if (item.type === 'series' && !episode) void playSeriesResume(item, player)
+    else playWith(item, episode, player)
     return
   }
 
@@ -195,9 +207,23 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
           items: { url: string; title: string }[],
           title: string,
           startIndex?: number,
-          mpvPath?: string
+          mpvPath?: string,
+          startSec?: number,
+          emby?: {
+            serverUrl: string
+            token: string
+            userId: string
+            deviceId: string
+            itemId: string
+            playSessionId: string
+          }
         ) => Promise<boolean>
-        playExternal?: (p: string, u: string, appPath?: string) => Promise<boolean>
+        playExternal?: (
+          p: string,
+          u: string,
+          appPath?: string,
+          startSec?: number
+        ) => Promise<boolean>
       }
     }
   ).nekoNative
@@ -216,19 +242,32 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
   const startAt = startIdx >= 0 ? startIdx : 0
   const targetIds = queue.length ? queue.map((e) => e.id) : [targetId]
 
+  // 从上次的播放进度续播（progress 0~1 × 时长分钟 → 秒）
+  const startItem = queue.length ? queue[startAt] : (episode ?? item)
+  const startSec = Math.floor((startItem.progress ?? 0) * (startItem.runtime || 0) * 60)
+
   Promise.all(targetIds.map((id) => getMpvPlayback(s, id)))
     .then((infos) => {
       const playItems = infos.map((r, i) => {
         const ep = queue[i]
         return { url: r.url, title: ep ? `${ep.episode}. ${ep.title}` : label }
       })
+      const psid = infos[startAt].playSessionId || `neko${Date.now()}`
+      const playItemId = queue.length ? queue[startAt].id : targetId
       if (player === 'mpv') {
-        native.playMpv!(playItems, label, startAt, settings.playerPaths.mpv || '')
+        native.playMpv!(playItems, label, startAt, settings.playerPaths.mpv || '', startSec, {
+          serverUrl: s.serverUrl,
+          token: s.token,
+          userId: s.userId,
+          deviceId: localStorage.getItem('neko-device-id') || '',
+          itemId: playItemId,
+          playSessionId: psid
+        })
       } else if (native.playExternal) {
         const key = player.toLowerCase()
-        native.playExternal(key, playItems[startAt].url, settings.playerPaths[key] || '')
+        native.playExternal(key, playItems[startAt].url, settings.playerPaths[key] || '', startSec)
       }
-      reportPlaybackStart(s, targetId, infos[startAt].playSessionId).catch(() => {})
+      reportPlaybackStart(s, playItemId, psid).catch(() => {})
     })
     .catch((e) => console.error('[NekoPlayer] 取流失败：', e))
 }
