@@ -37,4 +37,6 @@ export interface SourceKindMeta {
   accent: string
   defaultPort?: number
   fields: SourceField[]
+  /** 暂未实现，弹窗里禁用并标注 */
+  disabled?: boolean
 }

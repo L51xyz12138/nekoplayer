@@ -127,6 +127,12 @@ function trackMpvProgress(socketPath, emby) {
   connect()
 }
 
+// Emby/Jellyfin 鉴权头：两个都发，兼容 Emby(X-Emby-Authorization) 与 Jellyfin 10.8+(Authorization)
+function embyAuthHeaders(emby) {
+  const v = `MediaBrowser Client="NekoPlayer", Device="NekoPlayer", DeviceId="${emby.deviceId || ''}", Version="0.1.1", Token="${emby.token}"`
+  return { 'X-Emby-Authorization': v, Authorization: v, 'Content-Type': 'application/json' }
+}
+
 async function reportMpvStopped(emby, posSeconds) {
   console.log('[mpv] 退出，回传进度：', Math.round(posSeconds), '秒 itemId=', emby?.itemId)
   if (!emby || !emby.serverUrl || !emby.token || !emby.itemId || posSeconds <= 0) return
@@ -134,10 +140,7 @@ async function reportMpvStopped(emby, posSeconds) {
     // authHeader 带上与开始播放一致的 DeviceId，Emby 才能把进度更新到同一会话
     const res = await fetch(`${emby.serverUrl}/Sessions/Playing/Stopped`, {
       method: 'POST',
-      headers: {
-        'X-Emby-Authorization': `MediaBrowser Client="NekoPlayer", Device="NekoPlayer", DeviceId="${emby.deviceId || ''}", Version="0.1.1", Token="${emby.token}"`,
-        'Content-Type': 'application/json'
-      },
+      headers: embyAuthHeaders(emby),
       body: JSON.stringify({
         ItemId: emby.itemId,
         PositionTicks: Math.round(posSeconds * 10_000_000),
@@ -156,10 +159,7 @@ async function reportMpvProgress(emby, posSeconds) {
   try {
     await fetch(`${emby.serverUrl}/Sessions/Playing/Progress`, {
       method: 'POST',
-      headers: {
-        'X-Emby-Authorization': `MediaBrowser Client="NekoPlayer", Device="NekoPlayer", DeviceId="${emby.deviceId || ''}", Version="0.1.1", Token="${emby.token}"`,
-        'Content-Type': 'application/json'
-      },
+      headers: embyAuthHeaders(emby),
       body: JSON.stringify({
         ItemId: emby.itemId,
         PositionTicks: Math.round(posSeconds * 10_000_000),

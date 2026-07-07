@@ -3,7 +3,7 @@
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
-const APP_VERSION = '0.1.5'
+const APP_VERSION = '0.1.6'
 
 function getDeviceId(): string {
   const KEY = 'neko-device-id'
@@ -118,10 +118,13 @@ async function request(
   token: string | undefined,
   init: RequestInit = {}
 ): Promise<Response> {
+  const auth = authHeader(token)
   const res = await fetch(`${serverUrl}${path}`, {
     ...init,
     headers: {
-      'X-Emby-Authorization': authHeader(token),
+      // 两个头都发：Emby 认 X-Emby-Authorization，Jellyfin 10.8+ 认 Authorization
+      'X-Emby-Authorization': auth,
+      Authorization: auth,
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
       ...init.headers
     }

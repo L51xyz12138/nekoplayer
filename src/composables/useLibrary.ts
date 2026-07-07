@@ -229,7 +229,7 @@ function clearLibrary() {
 /** 从真实 Emby 拉取媒体库 */
 async function loadFromEmby() {
   const embySources = useSources().sources.value.filter(
-    (s) => s.kind === 'emby' && s.enabled && s.session
+    (s) => (s.kind === 'emby' || s.kind === 'jellyfin') && s.enabled && s.session
   )
   if (!embySources.length) {
     state.items = []

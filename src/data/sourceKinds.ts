@@ -30,7 +30,8 @@ export const sourceKinds: SourceKindMeta[] = [
     description: '连接 Plex Media Server，畅享海量在线元数据',
     accent: '#e5a00d',
     defaultPort: 32400,
-    fields: serverFields('32400')
+    fields: serverFields('32400'),
+    disabled: true
   }
 ]
 

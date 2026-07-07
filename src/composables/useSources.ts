@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { pget, pset } from './persist'
 import type { EmbySession } from '@/api/emby'
-import type { MediaSource } from '@/types/source'
+import type { MediaSource, SourceKind } from '@/types/source'
 
 const SOURCES_KEY = 'neko-sources'
 
@@ -53,11 +53,11 @@ function hostOf(url: string): string {
   }
 }
 
-/** 把 Emby 登录会话反映为一个媒体源（id 用 serverId，与媒体的 sourceId 对齐） */
-function upsertEmbySource(session: EmbySession, name?: string) {
+/** 把 Emby/Jellyfin 登录会话反映为一个媒体源（id 用 serverId，与媒体的 sourceId 对齐） */
+function upsertEmbySource(session: EmbySession, name?: string, kind: SourceKind = 'emby') {
   const src: MediaSource = {
     id: session.serverId,
-    kind: 'emby',
+    kind,
     name: name?.trim() || `${session.userName} @ ${hostOf(session.serverUrl)}`,
     address: session.serverUrl,
     status: 'online',

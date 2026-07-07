@@ -94,7 +94,7 @@ async function submit() {
   submitting.value = true
   try {
     const session = await login(buildAddress(), form.username, form.password)
-    upsertEmbySource(session, name.value)
+    upsertEmbySource(session, name.value, kind.value)
     emit('close')
     // 大库拉取较慢，放后台进行（主页显示骨架屏/继续观看），不阻塞关窗
     loadFromEmby()
@@ -123,14 +123,16 @@ async function submit() {
                 v-for="k in sourceKinds"
                 :key="k.kind"
                 class="kind"
-                :class="{ on: kind === k.kind }"
+                :class="{ on: kind === k.kind, 'is-disabled': k.disabled }"
                 :style="kind === k.kind ? { borderColor: k.accent } : {}"
+                :disabled="k.disabled"
                 @click="selectKind(k.kind)"
               >
                 <span class="kind__icon" :style="{ color: k.accent, background: k.accent + '22' }">
                   <Server :size="18" />
                 </span>
                 <span class="kind__label">{{ k.label }}</span>
+                <span v-if="k.disabled" class="kind__soon">开发中</span>
               </button>
             </div>
           </template>
@@ -287,6 +289,21 @@ async function submit() {
 .kind__label {
   font-size: 12.5px;
   font-weight: 600;
+}
+.kind.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.kind.is-disabled:hover {
+  background: var(--surface);
+}
+.kind__soon {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  color: var(--text-mute);
+  background: var(--surface-2);
 }
 .kind__desc {
   margin: 16px 0 4px;
