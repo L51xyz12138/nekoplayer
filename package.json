@@ -21,7 +21,6 @@
     "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {
-    "hls.js": "^1.5.20",
     "lucide-vue-next": "^0.462.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"

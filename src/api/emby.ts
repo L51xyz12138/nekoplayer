@@ -292,61 +292,6 @@ export async function getMpvPlayback(
   return { url, playSessionId }
 }
 
-// Web 内置播放器（hls.js）用的设备配置
-const WEB_DEVICE_PROFILE = {
-  MaxStreamingBitrate: 120_000_000,
-  DirectPlayProfiles: [
-    {
-      Container: 'mp4,m4v,mov,webm',
-      Type: 'Video',
-      VideoCodec: 'h264,hevc,vp8,vp9,av1',
-      AudioCodec: 'aac,mp3,opus,flac,ac3,eac3'
-    }
-  ],
-  TranscodingProfiles: [
-    {
-      Container: 'ts',
-      Type: 'Video',
-      VideoCodec: 'h264',
-      AudioCodec: 'aac,mp3',
-      Context: 'Streaming',
-      Protocol: 'hls',
-      MaxAudioChannels: '2',
-      MinSegments: 1,
-      BreakOnNonKeyFrames: true
-    }
-  ],
-  ContainerProfiles: [],
-  CodecProfiles: [],
-  SubtitleProfiles: [{ Format: 'vtt', Method: 'External' }]
-}
-
-/** Web 内置播放器：PlaybackInfo 拿播放源 */
-export async function getPlaybackInfo(
-  session: EmbySession,
-  itemId: string
-): Promise<{ playSessionId: string; source: EmbyPlaybackSource | null }> {
-  const res = await request(session.serverUrl, `/Items/${itemId}/PlaybackInfo?UserId=${session.userId}`, session.token, {
-    method: 'POST',
-    body: JSON.stringify({ DeviceProfile: WEB_DEVICE_PROFILE })
-  })
-  const data = await res.json()
-  return { playSessionId: data.PlaySessionId ?? '', source: data.MediaSources?.[0] ?? null }
-}
-
-/** Web 内置播放器：解析播放地址（转码 HLS / 直连） */
-export function resolvePlaybackUrl(
-  source: EmbyPlaybackSource,
-  session: EmbySession
-): { url: string; type: 'hls' | 'direct' } {
-  if (source.TranscodingUrl) {
-    return { url: `${session.serverUrl}${source.TranscodingUrl}`, type: 'hls' }
-  }
-  const container = source.Container || 'mp4'
-  const q = new URLSearchParams({ Static: 'true', MediaSourceId: source.Id, api_key: session.token })
-  return { url: `${session.serverUrl}/Videos/${source.Id}/stream.${container}?${q}`, type: 'direct' }
-}
-
 /** 收藏 / 取消收藏（写回服务器） */
 export async function setFavorite(
   session: EmbySession,
@@ -378,18 +323,5 @@ export async function reportPlaybackStart(
   await request(session.serverUrl, '/Sessions/Playing', session.token, {
     method: 'POST',
     body: JSON.stringify({ ItemId: itemId, PlaySessionId: playSessionId, PlayMethod: 'DirectStream' })
-  })
-}
-
-/** 上报播放停止，回写观看进度（1 秒 = 10^7 ticks） */
-export async function reportPlaybackStopped(
-  session: EmbySession,
-  itemId: string,
-  positionTicks: number,
-  playSessionId?: string
-): Promise<void> {
-  await request(session.serverUrl, '/Sessions/Playing/Stopped', session.token, {
-    method: 'POST',
-    body: JSON.stringify({ ItemId: itemId, PositionTicks: positionTicks, PlaySessionId: playSessionId })
   })
 }

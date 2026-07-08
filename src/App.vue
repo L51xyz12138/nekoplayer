@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import SideBar from '@/components/layout/SideBar.vue'
-import PlayerOverlay from '@/components/player/PlayerOverlay.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSettings } from '@/composables/useSettings'
 
@@ -28,9 +27,6 @@ onMounted(() => {
         </transition>
       </router-view>
     </main>
-
-    <!-- 全局播放器覆盖层：可从任意页面唤起 -->
-    <PlayerOverlay />
   </div>
 </template>
 
