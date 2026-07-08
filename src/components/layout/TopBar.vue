@@ -60,7 +60,8 @@ function pickSort(mode: SortMode) {
         <input
           :value="query"
           type="text"
-          placeholder="搜索影片、剧集…"
+          placeholder="搜索影片、剧集…（按 / 聚焦）"
+          data-search-input
           @input="emit('update:query', ($event.target as HTMLInputElement).value)"
         />
         <button

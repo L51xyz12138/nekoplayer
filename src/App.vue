@@ -3,11 +3,15 @@ import { onMounted } from 'vue'
 import SideBar from '@/components/layout/SideBar.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSettings } from '@/composables/useSettings'
+import { useHotkeys } from '@/composables/useHotkeys'
 
 const { loadFromEmby, refreshAfterPlayback } = useLibrary()
 
 // 初始化并应用已保存的设置（主题色等）
 useSettings()
+
+// 全局键盘快捷键（/ 聚焦搜索、方向键选卡、Esc 返回/失焦）
+useHotkeys()
 
 // 启动：从持久化的媒体源聚合加载媒体库
 onMounted(() => {

@@ -14,10 +14,22 @@ function open() {
   const path = props.item.type === 'collection' ? 'collection' : 'detail'
   router.push(`/${path}/${props.item.id}`)
 }
+// 空格键：合集打开、其它直接播放
+function onSpace() {
+  if (props.item.type === 'collection') open()
+  else emit('play', props.item)
+}
 </script>
 
 <template>
-  <article class="card" @click="open">
+  <article
+    class="card"
+    tabindex="0"
+    data-nav-card
+    @click="open"
+    @keydown.enter="open"
+    @keydown.space.prevent="onSpace"
+  >
     <div class="card__poster">
       <PosterImage
         :seed="item.id"
@@ -78,6 +90,16 @@ function open() {
 .card:hover .card__poster {
   transform: translateY(-5px) scale(1.03);
   box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+/* 键盘导航焦点：强调色描边 + 显示播放层 */
+.card:focus-visible {
+  outline: none;
+}
+.card:focus-visible .card__poster {
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+.card:focus-visible .card__overlay {
+  opacity: 1;
 }
 
 .card__overlay {

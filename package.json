@@ -1,6 +1,6 @@
 {
   "name": "nekoplayer",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "description": "跨平台媒体播放器",

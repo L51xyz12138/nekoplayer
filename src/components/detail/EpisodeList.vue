@@ -72,7 +72,11 @@ watch(
         class="ep"
         :class="{ resuming: ep.id === resumeId }"
         :data-ep-id="ep.id"
+        tabindex="0"
+        data-nav-card
         @click="emit('play', ep)"
+        @keydown.enter="emit('play', ep)"
+        @keydown.space.prevent="emit('play', ep)"
       >
         <div class="ep__thumb">
           <PosterImage :seed="ep.stillSeed" :src="ep.stillUrl" kind="still" />
@@ -179,6 +183,16 @@ watch(
 .ep:hover .ep__thumb {
   transform: translateY(-4px);
   box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+.ep:focus-visible {
+  outline: none;
+}
+.ep:focus-visible .ep__thumb {
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+.ep:focus-visible .ep__play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 /* 续看集：常驻强调色描边 */
 .ep.resuming .ep__thumb {

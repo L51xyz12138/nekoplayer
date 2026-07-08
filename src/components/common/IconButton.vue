@@ -42,6 +42,10 @@ withDefaults(
 .icon-btn:active {
   transform: scale(0.94);
 }
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .icon-btn.solid {
   color: #0b0c11;

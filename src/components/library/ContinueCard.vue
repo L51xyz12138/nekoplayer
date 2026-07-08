@@ -20,7 +20,14 @@ const info = computed(() =>
 </script>
 
 <template>
-  <article class="cc" @click="emit('play', item)">
+  <article
+    class="cc"
+    tabindex="0"
+    data-nav-card
+    @click="emit('play', item)"
+    @keydown.enter="emit('play', item)"
+    @keydown.space.prevent="emit('play', item)"
+  >
     <div class="cc__thumb">
       <PosterImage :seed="nextUp?.episodeId ?? item.id" :src="still" kind="backdrop" />
       <div class="cc__scrim" />
@@ -55,6 +62,16 @@ const info = computed(() =>
 .cc:hover .cc__thumb {
   transform: translateY(-4px);
   box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+.cc:focus-visible {
+  outline: none;
+}
+.cc:focus-visible .cc__thumb {
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+}
+.cc:focus-visible .cc__play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .cc__scrim {

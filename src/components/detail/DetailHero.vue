@@ -80,7 +80,7 @@ const players: string[] = nn?.playMpv
         </div>
 
         <div class="dhero__actions">
-          <IconButton variant="solid" label="播放" @click="emit('play')">
+          <IconButton variant="solid" label="播放" data-nav-card @click="emit('play')">
             <Play :size="18" fill="currentColor" />
           </IconButton>
           <IconButton
@@ -88,6 +88,7 @@ const players: string[] = nn?.playMpv
             :key="p"
             variant="glass"
             :label="p"
+            data-nav-card
             @click="emit('play-with', p)"
           >
             <ExternalLink :size="16" />
@@ -95,6 +96,7 @@ const players: string[] = nn?.playMpv
           <IconButton
             variant="glass"
             round
+            data-nav-card
             :active="item.favorite"
             :title="item.favorite ? '取消收藏' : '收藏'"
             @click="emit('favorite')"
@@ -104,6 +106,7 @@ const players: string[] = nn?.playMpv
           <IconButton
             variant="glass"
             round
+            data-nav-card
             :active="item.watched"
             :title="item.watched ? '取消已看' : '标记已看'"
             @click="emit('toggle-watched')"
