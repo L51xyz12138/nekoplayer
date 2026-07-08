@@ -16,7 +16,7 @@
 
 - 🎬 **多媒体源** —— 连接 Emby / Jellyfin / Plex，可聚合浏览也可单独查看
 - 🖥️ **跨平台** —— Windows / macOS / Linux 桌面客户端
-- ▶️ **外部播放器** —— mpv / IINA / VLC / Infuse / PotPlayer，本地解码不转码，NAS/服务器零转码负载
+- ▶️ **外部播放器** —— mpv / IINA / VLC / PotPlayer，本地解码不转码，NAS/服务器零转码负载
 - 📦 **开箱即用** —— 自带 mpv（含 [uosc](https://github.com/tomasklaen/uosc) 现代界面 + 中文菜单），无需另外安装
 - 🎞️ **整季连播** —— 剧集自动播放下一集
 - 🎨 **精致 UI** —— 海报墙、多主题强调色、详情页、演职人员、进度同步

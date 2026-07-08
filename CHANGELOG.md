@@ -60,6 +60,6 @@
 ## v0.1.0
 
 - 首个版本：连接 Emby 服务器，浏览影视库
-- 支持 mpv / IINA / VLC / Infuse / PotPlayer 外部播放
+- 支持 mpv / IINA / VLC / PotPlayer 外部播放
 - 剧集整季连播、多主题强调色、详情页、演职人员
 - GitHub Actions 三平台自动构建发布

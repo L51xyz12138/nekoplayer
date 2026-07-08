@@ -215,7 +215,7 @@ function play(item: MediaItem, episode?: Episode) {
 }
 
 /** 直接用 IINA 打开播放（外部播放器） */
-/** 用指定播放器播放（mpv/IINA/VLC/Infuse/PotPlayer）；剧集带整季播放列表 */
+/** 用指定播放器播放（mpv/IINA/VLC/PotPlayer）；剧集带整季播放列表 */
 function playWith(item: MediaItem, episode: Episode | undefined, player: string) {
   const native = window.nekoNative
   const s = useSources().sessionOf(item.sourceId)

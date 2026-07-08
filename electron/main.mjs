@@ -260,7 +260,7 @@ function openExternal(player, url, customPath, startSec) {
   const seek = typeof startSec === 'number' && startSec > 0 ? startSec : 0
   try {
     if (process.platform === 'darwin') {
-      const appMap = { iina: 'IINA', vlc: 'VLC', infuse: 'Infuse' }
+      const appMap = { iina: 'IINA', vlc: 'VLC' }
       if (customPath) {
         // IINA：用 .app 内的 iina-cli 精确调用（可传 --mpv-start 续播），绕过 LaunchServices
         if (player === 'iina') {
