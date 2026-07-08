@@ -4,7 +4,7 @@ import { imageUrl, type EmbyItem, type EmbyPerson, type EmbySession } from './em
 const TICKS_PER_MINUTE = 600_000_000 // 1 分钟 = 6e8 个 100ns tick
 
 /** 稳健地算进度 0-1：优先 PlayedPercentage，缺失时用 位置/时长（魔改 Emby 常不给百分比，但恒有 PlaybackPositionTicks） */
-function progressOf(userData: EmbyItem['UserData'], runTimeTicks?: number): number | undefined {
+export function progressOf(userData: EmbyItem['UserData'], runTimeTicks?: number): number | undefined {
   const pct = userData?.PlayedPercentage
   if (pct && pct > 0 && pct < 100) return pct / 100
   const pos = userData?.PlaybackPositionTicks ?? 0

@@ -5,7 +5,7 @@ import PlayerOverlay from '@/components/player/PlayerOverlay.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSettings } from '@/composables/useSettings'
 
-const { loadFromEmby } = useLibrary()
+const { loadFromEmby, refreshAfterPlayback } = useLibrary()
 
 // 初始化并应用已保存的设置（主题色等）
 useSettings()
@@ -13,8 +13,8 @@ useSettings()
 // 启动：从持久化的媒体源聚合加载媒体库
 onMounted(() => {
   loadFromEmby()
-  // 外部播放器结束后，主进程通知前端刷新，更新最新播放进度
-  window.nekoNative?.onPlaybackEnded(() => loadFromEmby())
+  // 外部播放器结束后，主进程通知前端「轻量刷新」（只刷继续观看+这条进度，不整库重拉）
+  window.nekoNative?.onPlaybackEnded((itemId) => refreshAfterPlayback(itemId))
 })
 </script>
 

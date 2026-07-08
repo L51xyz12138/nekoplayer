@@ -115,7 +115,8 @@ function trackMpvProgress(socketPath, emby) {
         reportMpvStopped(emby, lastPos)
         // 延迟一下等 Emby 处理完 Stopped，再通知前端刷新，拉到最新进度
         setTimeout(() => {
-          if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('playback-ended')
+          if (mainWin && !mainWin.isDestroyed())
+            mainWin.webContents.send('playback-ended', emby?.itemId)
         }, 1000)
       })
     })

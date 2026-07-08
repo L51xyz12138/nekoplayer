@@ -32,8 +32,8 @@ export interface NekoNative {
   ): Promise<boolean>
   /** 唤起系统外部播放器（iina/vlc/infuse/potplayer） */
   playExternal(player: string, url: string, appPath?: string, startSec?: number): Promise<boolean>
-  /** 外部播放结束后主进程回调，前端据此刷新进度 */
-  onPlaybackEnded(cb: () => void): void
+  /** 外部播放结束后主进程回调（带刚播放的 itemId），前端据此轻量刷新进度 */
+  onPlaybackEnded(cb: (itemId?: string) => void): void
   /** 读持久化存储（同步，供模块初始化时用）；无值返回 null */
   storeGet(key: string): string | null
   /** 写持久化存储（异步、去抖落盘） */

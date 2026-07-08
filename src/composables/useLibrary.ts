@@ -2,14 +2,17 @@ import { computed, reactive, toRefs } from 'vue'
 import {
   getCollections,
   getEpisodes,
+  getItem,
   getItems,
   getNextUp,
   getResume,
   getViews,
   setFavorite,
-  setPlayed
+  setPlayed,
+  type EmbyItem,
+  type EmbySession
 } from '@/api/emby'
-import { mapEmbyItem, mapEpisodes, mapNextUp } from '@/api/mapper'
+import { mapEmbyItem, mapEpisodes, mapNextUp, progressOf } from '@/api/mapper'
 import { useSources } from './useSources'
 import { pget, pset } from './persist'
 import type { LibraryCategory, MediaItem, SortMode } from '@/types/media'
@@ -226,6 +229,41 @@ function clearLibrary() {
   saveCache([])
 }
 
+/** 把 NextUp/Resume 挂到对应条目上（续看点 + 最近播放时间 + 在看电影进度）。loadFromEmby 与播放后刷新共用 */
+function applyContinueWatching(
+  items: MediaItem[],
+  nextUps: EmbyItem[],
+  resumes: EmbyItem[],
+  session: EmbySession
+) {
+  const byId = new Map(items.map((m) => [m.id, m]))
+  const now = Date.now()
+  const stamp = (m: MediaItem, lp: string | undefined, rank: number) => {
+    if (m.lastPlayed != null) return
+    m.lastPlayed = lp ? Date.parse(lp) : now - rank * 60_000
+  }
+  // Resume：正在看的电影/分集（最近在前）；剧集取最新一集作续看点，电影更新自身进度
+  resumes.forEach((e, i) => {
+    const target =
+      e.Type === 'Episode' ? (e.SeriesId ? byId.get(e.SeriesId) : undefined) : byId.get(e.Id)
+    if (!target) return
+    if (e.Type === 'Episode') {
+      if (!target.nextUp) target.nextUp = mapNextUp(e, session)
+    } else {
+      target.progress = progressOf(e.UserData, e.RunTimeTicks)
+      target.positionTicks = e.UserData?.PlaybackPositionTicks || undefined
+    }
+    stamp(target, e.UserData?.LastPlayedDate, i)
+  })
+  // NextUp：补「没有正在看的集」的剧（追完当前集 → 下一集），排在 Resume 之后
+  nextUps.forEach((e, i) => {
+    const series = e.SeriesId ? byId.get(e.SeriesId) : undefined
+    if (!series || series.nextUp) return
+    series.nextUp = mapNextUp(e, session)
+    stamp(series, e.UserData?.LastPlayedDate, resumes.length + i)
+  })
+}
+
 /** 从真实 Emby 拉取媒体库 */
 async function loadFromEmby() {
   const embySources = useSources().sources.value.filter(
@@ -282,29 +320,7 @@ async function loadFromEmby() {
             mapped = items.map((it) => mapEmbyItem(it, session))
           }
 
-          const byId = new Map(mapped.map((m) => [m.id, m]))
-          // 端点已按最近活动排序：用其顺序赋「最近播放」时间戳
-          // （魔改 Emby 常不给 LastPlayedDate，用排名兜底，rank 越小越近）
-          const now = Date.now()
-          const stamp = (m: MediaItem, lp: string | undefined, rank: number) => {
-            if (m.lastPlayed != null) return
-            m.lastPlayed = lp ? Date.parse(lp) : now - rank * 60_000
-          }
-          // Resume：正在看的电影/分集（最近在前）；剧集取最新一集作续看点
-          resumes.forEach((e, i) => {
-            const target =
-              e.Type === 'Episode' ? (e.SeriesId ? byId.get(e.SeriesId) : undefined) : byId.get(e.Id)
-            if (!target) return
-            if (e.Type === 'Episode' && !target.nextUp) target.nextUp = mapNextUp(e, src.session!)
-            stamp(target, e.UserData?.LastPlayedDate, i)
-          })
-          // NextUp：补「没有正在看的集」的剧（追完当前集 → 下一集），排在 Resume 之后
-          nextUps.forEach((e, i) => {
-            const series = e.SeriesId ? byId.get(e.SeriesId) : undefined
-            if (!series || series.nextUp) return
-            series.nextUp = mapNextUp(e, src.session!)
-            stamp(series, e.UserData?.LastPlayedDate, resumes.length + i)
-          })
+          applyContinueWatching(mapped, nextUps, resumes, session)
           // 合集追加进来（无 libraryId，仅在「全部库」下出现；可搜索、可浏览）
           return [...mapped, ...collections.map((c) => mapEmbyItem(c, session))]
         } catch (e) {
@@ -331,6 +347,51 @@ async function loadFromEmby() {
   } finally {
     state.loading = false
   }
+}
+
+/**
+ * 播放结束后的轻量刷新：不整库重拉（避免高频大流量、降低触发风控风险），
+ * 只拉每源的 NextUp+Resume 两个小请求刷新继续观看，再拉「刚看完那条」的详情更新其进度。
+ */
+async function refreshAfterPlayback(playedId?: string) {
+  const embySources = useSources().sources.value.filter(
+    (s) => (s.kind === 'emby' || s.kind === 'jellyfin') && s.enabled && s.session
+  )
+  if (!embySources.length) return
+
+  // 1) 更新刚看完的顶层条目（电影/剧集）自身进度——决定它是否离开继续观看
+  if (playedId) {
+    const played = getById(playedId)
+    const s = played ? useSources().sessionOf(played.sourceId) : undefined
+    if (played && s) {
+      try {
+        const d = await getItem(s, playedId)
+        played.progress = progressOf(d.UserData, d.RunTimeTicks)
+        played.positionTicks = d.UserData?.PlaybackPositionTicks || undefined
+        played.watched = d.UserData?.Played
+      } catch (e) {
+        console.warn('[NekoPlayer] 刷新条目进度失败：', e)
+      }
+    }
+  }
+
+  // 2) 只刷新继续观看：每源仅 NextUp+Resume；重置本源条目的续看点后重挂
+  await Promise.all(
+    embySources.map(async (src) => {
+      const session = src.session!
+      const [nextUps, resumes] = await Promise.all([
+        getNextUp(session).catch(() => []),
+        getResume(session).catch(() => [])
+      ])
+      const sourceItems = state.items.filter((m) => m.sourceId === session.serverId)
+      for (const m of sourceItems) {
+        m.nextUp = undefined
+        m.lastPlayed = undefined
+      }
+      applyContinueWatching(sourceItems, nextUps, resumes, session)
+    })
+  )
+  saveCache(state.items)
 }
 
 /** 按需拉取某部剧集的季/集并填充 */
@@ -371,6 +432,7 @@ export function useLibrary() {
     setActiveLibrary,
     clearLibrary,
     loadFromEmby,
+    refreshAfterPlayback,
     loadSeasons
   }
 }
