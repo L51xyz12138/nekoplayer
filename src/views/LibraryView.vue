@@ -25,6 +25,7 @@ const {
   category,
   sort,
   counts,
+  activeFilterCount,
   filtered,
   continueWatching,
   recentlyAdded,
@@ -42,13 +43,17 @@ const {
 
 const player = usePlayer()
 
-const browseMode = computed(() => category.value === 'all' && !query.value.trim())
+// 有搜索、切到具体分类、或启用了筛选时，都改为展示「筛选/结果网格」而非首页浏览布局
+const browseMode = computed(
+  () => category.value === 'all' && !query.value.trim() && activeFilterCount.value === 0
+)
 
 const gridTitle = computed(() => {
   if (query.value.trim()) return `搜索结果 · “${query.value.trim()}”`
   if (category.value === 'movie') return '全部电影'
   if (category.value === 'series') return '全部剧集'
   if (category.value === 'favorite') return '我的收藏'
+  if (activeFilterCount.value > 0) return '筛选结果'
   return '全部'
 })
 

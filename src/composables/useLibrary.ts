@@ -44,6 +44,10 @@ interface LibraryState {
   query: string
   category: LibraryCategory
   sort: SortMode
+  /** 附加筛选：类型(genre) / 年份(十年代，如 '2010') / 只看未看；'' 表示不限 */
+  genre: string
+  year: string
+  unwatched: boolean
   /** 'all' 表示聚合全部来源，否则为具体媒体源 id */
   activeSourceId: string
   /** 'all' 表示全部媒体库，否则为具体库 id（`serverId:viewId`） */
@@ -60,6 +64,9 @@ const state = reactive<LibraryState>({
   query: '',
   category: 'all',
   sort: 'recent',
+  genre: '',
+  year: '',
+  unwatched: false,
   activeSourceId: 'all',
   activeLibraryId: 'all',
   loading: false,
@@ -98,6 +105,21 @@ const counts = computed<Record<LibraryCategory, number>>(() => ({
   favorite: scoped.value.filter((m) => m.favorite).length
 }))
 
+// 当前作用域下可选的「类型(genre)」与「年份(十年代)」——供筛选面板列出
+const genreOptions = computed(() => {
+  const set = new Set<string>()
+  for (const m of scoped.value) for (const g of m.genres) set.add(g)
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh'))
+})
+const decadeOptions = computed(() => {
+  const set = new Set<number>()
+  for (const m of scoped.value) if (m.year) set.add(Math.floor(m.year / 10) * 10)
+  return [...set].sort((a, b) => b - a) // 新的在前
+})
+const activeFilterCount = computed(
+  () => (state.genre ? 1 : 0) + (state.year ? 1 : 0) + (state.unwatched ? 1 : 0)
+)
+
 const filtered = computed(() => {
   const q = state.query.trim().toLowerCase()
 
@@ -116,6 +138,14 @@ const filtered = computed(() => {
     else if (state.category === 'series') list = list.filter((m) => m.type === 'series')
     else if (state.category === 'favorite') list = list.filter((m) => m.favorite)
   }
+
+  // 附加筛选：类型(genre) / 年份(十年代) / 未看
+  if (state.genre) list = list.filter((m) => m.genres.includes(state.genre))
+  if (state.year) {
+    const d = Number(state.year)
+    list = list.filter((m) => m.year >= d && m.year < d + 10)
+  }
+  if (state.unwatched) list = list.filter((m) => !m.watched)
 
   switch (state.sort) {
     case 'title':
@@ -214,12 +244,28 @@ function setCategory(v: LibraryCategory) {
 function setSort(v: SortMode) {
   state.sort = v
 }
+function setGenre(v: string) {
+  state.genre = v
+}
+function setYear(v: string) {
+  state.year = v
+}
+function setUnwatched(v: boolean) {
+  state.unwatched = v
+}
+function resetFilters() {
+  state.genre = ''
+  state.year = ''
+  state.unwatched = false
+}
 function setActiveSource(id: string) {
   state.activeSourceId = id
   state.activeLibraryId = 'all' // 不同源的库不同，切源时重置到全部库
+  resetFilters() // 不同作用域可选的类型/年份不同，切换时清空筛选
 }
 function setActiveLibrary(id: string) {
   state.activeLibraryId = id
+  resetFilters()
 }
 
 function clearLibrary() {
@@ -414,6 +460,9 @@ export function useLibrary() {
     scoped,
     libraries,
     counts,
+    genreOptions,
+    decadeOptions,
+    activeFilterCount,
     filtered,
     continueWatching,
     recentlyAdded,
@@ -428,6 +477,10 @@ export function useLibrary() {
     setQuery,
     setCategory,
     setSort,
+    setGenre,
+    setYear,
+    setUnwatched,
+    resetFilters,
     setActiveSource,
     setActiveLibrary,
     clearLibrary,

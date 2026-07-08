@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search, ChevronDown, X } from 'lucide-vue-next'
 import { ref } from 'vue'
+import FilterMenu from '@/components/library/FilterMenu.vue'
 import type { LibraryCategory, SortMode } from '@/types/media'
 
 defineProps<{
@@ -72,6 +73,8 @@ function pickSort(mode: SortMode) {
           <X :size="15" />
         </button>
       </label>
+
+      <FilterMenu />
 
       <div class="sort" @click.stop="sortOpen = !sortOpen">
         <div
