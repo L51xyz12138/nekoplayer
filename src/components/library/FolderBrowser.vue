@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Folder, ChevronRight, House } from 'lucide-vue-next'
+import { Folder, ChevronRight, House, Layers } from 'lucide-vue-next'
 import PosterCard from './PosterCard.vue'
+import { useLibrary } from '@/composables/useLibrary'
 import type { MediaItem } from '@/types/media'
 
 const props = defineProps<{ items: MediaItem[]; rootName?: string }>()
 const emit = defineEmits<{ favorite: [id: string]; play: [item: MediaItem] }>()
+
+const { saveManualSeries } = useLibrary()
 
 // 当前所在文件夹（路径段）；切源（rootName 变）时回到根
 const path = ref<string[]>([])
@@ -43,26 +46,46 @@ const folders = computed(() => {
 
 // 当前层直接包含的视频
 const videos = computed(() => props.items.filter((m) => (m.folder ?? '') === prefix.value))
+
+// 当前文件夹（含子文件夹）下的所有「单个视频」——可手动组成一部剧集
+const groupable = computed(() =>
+  props.items.filter((m) => m.type === 'movie' && !!m.localPath && inBranch(m.folder ?? ''))
+)
+function makeSeries() {
+  if (groupable.value.length < 2) return
+  const name = path.value[path.value.length - 1] || props.rootName || '剧集'
+  saveManualSeries(name, groupable.value.map((m) => m.id))
+}
 </script>
 
 <template>
   <div class="fb">
-    <!-- 面包屑 -->
-    <div class="fb__crumbs">
-      <button class="fb__crumb" :class="{ on: !path.length }" @click="path = []">
-        <House :size="15" />
-        {{ rootName || '根目录' }}
-      </button>
-      <template v-for="(seg, i) in path" :key="i">
-        <ChevronRight :size="14" class="fb__sep" />
-        <button
-          class="fb__crumb"
-          :class="{ on: i === path.length - 1 }"
-          @click="path = path.slice(0, i + 1)"
-        >
-          {{ seg }}
+    <!-- 面包屑 + 手动组成剧集 -->
+    <div class="fb__bar">
+      <div class="fb__crumbs">
+        <button class="fb__crumb" :class="{ on: !path.length }" @click="path = []">
+          <House :size="15" />
+          {{ rootName || '根目录' }}
         </button>
-      </template>
+        <template v-for="(seg, i) in path" :key="i">
+          <ChevronRight :size="14" class="fb__sep" />
+          <button
+            class="fb__crumb"
+            :class="{ on: i === path.length - 1 }"
+            @click="path = path.slice(0, i + 1)"
+          >
+            {{ seg }}
+          </button>
+        </template>
+      </div>
+      <button
+        v-if="groupable.length >= 2"
+        class="fb__group"
+        title="把此文件夹（含子文件夹）里的视频合并成一部剧集"
+        @click="makeSeries"
+      >
+        <Layers :size="14" /> 组成剧集 ({{ groupable.length }})
+      </button>
     </div>
 
     <p v-if="!folders.length && !videos.length" class="fb__empty">这个文件夹里没有视频喵～</p>
@@ -93,12 +116,36 @@ const videos = computed(() => props.items.filter((m) => (m.folder ?? '') === pre
 .fb {
   padding-top: 4px;
 }
+.fb__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
 .fb__crumbs {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 18px;
+  min-width: 0;
+}
+.fb__group {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: var(--r-pill);
+  box-shadow: 0 6px 16px var(--accent-glow);
+  transition: transform var(--dur) var(--ease);
+}
+.fb__group:active {
+  transform: scale(0.96);
 }
 .fb__crumb {
   display: inline-flex;

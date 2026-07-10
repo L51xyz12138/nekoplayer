@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, Pencil } from 'lucide-vue-next'
+import { ArrowLeft, Pencil, Unlink } from 'lucide-vue-next'
 import DetailHero from '@/components/detail/DetailHero.vue'
 import EditMetaDialog from '@/components/detail/EditMetaDialog.vue'
 import EpisodeList from '@/components/detail/EpisodeList.vue'
@@ -16,7 +16,16 @@ import type { Episode, MediaItem } from '@/types/media'
 const props = defineProps<{ id: string }>()
 
 const router = useRouter()
-const { getById, items, toggleFavorite, toggleWatched, loadSeasons, saveMetaOverride } = useLibrary()
+const {
+  getById,
+  items,
+  toggleFavorite,
+  toggleWatched,
+  loadSeasons,
+  saveMetaOverride,
+  clearMetaOverride,
+  removeManualSeries
+} = useLibrary()
 const player = usePlayer()
 
 const item = computed(() => getById(props.id))
@@ -26,9 +35,21 @@ const isFileItem = computed(() => {
   const it = item.value
   return !!it && (!!it.localPath || it.id.startsWith('local-series:'))
 })
+// 手动组成的剧集可「解散」
+const isManualSeries = computed(() => item.value?.id.startsWith('local-series:manual:') ?? false)
+// 文件源：显示视频文件地址（电影=文件路径/URL；剧集=所在文件夹）
+const filePath = computed(() => item.value?.localPath || item.value?.folder || '')
 const editOpen = ref(false)
 function onSaveMeta(data: Partial<MediaItem>) {
   if (item.value) saveMetaOverride(item.value.id, data)
+}
+function onResetMeta() {
+  if (item.value) clearMetaOverride(item.value.id)
+}
+function ungroup() {
+  if (!item.value) return
+  removeManualSeries(item.value.id)
+  router.back()
 }
 
 // 续看集 id：用于剧集列表自动定位/高亮到「正在看的那一集」
@@ -105,7 +126,10 @@ function playItem(m: MediaItem) {
       <transition name="fade">
         <span v-if="scrolled" class="detail__topbar-title">{{ item.title }}</span>
       </transition>
-      <button v-if="isFileItem" class="detail__edit" title="编辑元数据" @click="editOpen = true">
+      <button v-if="isManualSeries" class="detail__edit" title="解散为单个视频" @click="ungroup">
+        <Unlink :size="15" /> 解散剧集
+      </button>
+      <button v-if="isFileItem" class="detail__edit" :class="{ 'detail__edit--sec': isManualSeries }" title="编辑元数据" @click="editOpen = true">
         <Pencil :size="16" /> 编辑
       </button>
     </header>
@@ -120,6 +144,10 @@ function playItem(m: MediaItem) {
       />
 
       <div class="detail__body">
+        <div v-if="filePath" class="detail__file" :title="filePath">
+          <span class="detail__file-label">{{ item.localPath ? '文件' : '文件夹' }}</span>
+          <code class="detail__file-path">{{ filePath }}</code>
+        </div>
         <MediaTechInfo v-if="item.tech" :tech="item.tech" />
         <EpisodeList
           v-if="item.type === 'series' && item.seasons"
@@ -140,7 +168,13 @@ function playItem(m: MediaItem) {
       </div>
     </div>
 
-    <EditMetaDialog :open="editOpen" :item="item || null" @close="editOpen = false" @save="onSaveMeta" />
+    <EditMetaDialog
+      :open="editOpen"
+      :item="item || null"
+      @close="editOpen = false"
+      @save="onSaveMeta"
+      @reset="onResetMeta"
+    />
   </div>
 
   <div v-else class="detail-missing">
@@ -198,6 +232,9 @@ function playItem(m: MediaItem) {
   font-size: 17px;
   font-weight: 700;
 }
+.detail__edit.detail__edit--sec {
+  margin-left: 10px;
+}
 .detail__edit {
   margin-left: auto;
   display: inline-flex;
@@ -227,6 +264,30 @@ function playItem(m: MediaItem) {
 }
 .detail__body {
   padding: 30px 44px 50px;
+}
+.detail__file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 11px 15px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.detail__file-label {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.detail__file-path {
+  min-width: 0;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--text-mute);
+  word-break: break-all;
+  user-select: text;
 }
 
 .detail-missing {

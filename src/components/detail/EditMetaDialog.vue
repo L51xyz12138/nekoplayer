@@ -6,7 +6,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import type { MediaItem, Person } from '@/types/media'
 
 const props = defineProps<{ open: boolean; item: MediaItem | null }>()
-const emit = defineEmits<{ close: []; save: [data: Partial<MediaItem>] }>()
+const emit = defineEmits<{ close: []; save: [data: Partial<MediaItem>]; reset: [] }>()
 
 const { scrapeByName } = useLibrary()
 
@@ -132,8 +132,13 @@ function save() {
         </div>
 
         <footer class="dialog__foot">
-          <button class="btn btn--ghost" @click="emit('close')">取消</button>
-          <button class="btn btn--primary" @click="save">保存</button>
+          <button class="btn btn--text" title="清除手动修改，恢复自动刮削" @click="emit('reset'), emit('close')">
+            重置为自动
+          </button>
+          <div class="dialog__foot-right">
+            <button class="btn btn--ghost" @click="emit('close')">取消</button>
+            <button class="btn btn--primary" @click="save">保存</button>
+          </div>
         </footer>
       </div>
     </div>
@@ -306,10 +311,24 @@ function save() {
 
 .dialog__foot {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
   padding: 16px 24px;
   border-top: 1px solid var(--border);
+}
+.dialog__foot-right {
+  display: flex;
+  gap: 12px;
+}
+.btn--text {
+  height: 42px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-mute);
+}
+.btn--text:hover {
+  color: var(--text-dim);
 }
 .btn {
   height: 42px;

@@ -72,6 +72,7 @@ watch(
         class="ep"
         :class="{ resuming: ep.id === resumeId }"
         :data-ep-id="ep.id"
+        :title="ep.localPath"
         tabindex="0"
         data-nav-card
         @click="emit('play', ep)"

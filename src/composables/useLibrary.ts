@@ -410,6 +410,60 @@ async function scrapeByName(query: string, isTv: boolean): Promise<ScrapeResult 
   )
 }
 
+// ---- 手动把散条目组成剧集 / 解散（自动聚合修不了时的兜底）----
+const MANUAL_KEY = 'neko-manual-series'
+interface ManualGroup {
+  title: string
+  ids: string[]
+}
+function loadManual(): Record<string, ManualGroup> {
+  try {
+    const raw = pget(MANUAL_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, ManualGroup>) : {}
+  } catch {
+    return {}
+  }
+}
+const manualSeries: Record<string, ManualGroup> = loadManual()
+
+// 最近一次扫到的原始文件条目（未聚合），供手动分组后免重扫、就地重聚合
+let lastRawFileItems: MediaItem[] = []
+
+/** 重新聚合文件源条目（不重扫），套手动覆盖后刷进库 */
+function reaggregateFiles() {
+  const embyItems = state.items.filter((m) => !isFileItem(m))
+  const aggregated = aggregateFileItems(lastRawFileItems)
+  for (const m of aggregated) applyOverride(m)
+  state.items = [...embyItems, ...aggregated]
+  saveCache(state.items)
+  void scrapeFileItems()
+}
+
+/** 手动把一组文件条目（ids）组成一部剧集 */
+function saveManualSeries(title: string, ids: string[]) {
+  if (ids.length < 1) return
+  manualSeries['m' + Date.now()] = { title: title.trim() || '未命名剧集', ids }
+  pset(MANUAL_KEY, JSON.stringify(manualSeries))
+  reaggregateFiles()
+}
+
+/** 解散手动剧集（id 形如 local-series:manual:<key>），成员还原为单个视频 */
+function removeManualSeries(seriesId: string) {
+  const key = seriesId.replace('local-series:manual:', '')
+  if (!manualSeries[key]) return
+  delete manualSeries[key]
+  pset(MANUAL_KEY, JSON.stringify(manualSeries))
+  reaggregateFiles()
+}
+
+/** 清除某条目的手动元数据覆盖，还原自动识别 */
+function clearMetaOverride(id: string) {
+  if (!overrides[id]) return
+  delete overrides[id]
+  pset(OVERRIDE_KEY, JSON.stringify(overrides))
+  reaggregateFiles()
+}
+
 /** 后台刮削文件源条目（仅未命中缓存的走网络），更新条目并写缓存 */
 async function scrapeFileItems() {
   const { settings } = useSettings()
@@ -567,7 +621,43 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
   const seriesMap = new Map<string, MediaItem>()
   const foldersOf = new Map<string, string[]>()
   const loose: MediaItem[] = []
+  // 手动分组优先：属于手动剧集的条目先建剧，其余再自动聚合
+  const claimed = new Set<string>()
+  for (const [key, g] of Object.entries(manualSeries)) {
+    const members = items.filter((m) => g.ids.includes(m.id))
+    if (!members.length) continue
+    members.forEach((m) => claimed.add(m.id))
+    const eps = [...members].sort((a, b) =>
+      (a.localPath ?? '').localeCompare(b.localPath ?? '', undefined, { numeric: true })
+    )
+    const series = seriesShell(
+      'local-series:manual:' + key,
+      eps[0].sourceId,
+      g.title,
+      eps.reduce((a, m) => Math.max(a, m.addedAt), 0)
+    )
+    series.folder = commonFolder(eps.map((m) => m.folder ?? ''))
+    series.seasons = [
+      {
+        season: 1,
+        title: '第 1 季',
+        episodes: eps.map((m, i) => ({
+          id: m.id,
+          season: 1,
+          episode: i + 1,
+          title: `第 ${i + 1} 集`,
+          runtime: 0,
+          overview: '',
+          stillSeed: m.id,
+          localPath: m.localPath,
+          folder: m.folder
+        }))
+      }
+    ]
+    out.push(series)
+  }
   for (const m of items) {
+    if (claimed.has(m.id)) continue
     const ep = m.episodeInfo
     if (!ep) {
       loose.push(m)
@@ -758,6 +848,7 @@ async function loadFileSourceItems(): Promise<MediaItem[]> {
 async function appendFileSourceItems() {
   try {
     const fileItems = await loadFileSourceItems()
+    lastRawFileItems = fileItems // 存原始条目，供手动分组后免重扫重聚合
     const embyItems = state.items.filter((m) => !isFileItem(m))
     // 把剧集分集聚合成剧集条目，套上手动覆盖（覆盖优先），再并入库
     const aggregated = aggregateFileItems(fileItems)
@@ -960,6 +1051,9 @@ export function useLibrary() {
     refreshAfterPlayback,
     loadSeasons,
     saveMetaOverride,
-    scrapeByName
+    scrapeByName,
+    clearMetaOverride,
+    saveManualSeries,
+    removeManualSeries
   }
 }
