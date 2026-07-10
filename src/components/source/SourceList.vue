@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Server, Pencil, Trash2 } from 'lucide-vue-next'
 import { sourceKindMeta } from '@/data/sourceKinds'
-import type { MediaSource } from '@/types/source'
+import { useLibrary } from '@/composables/useLibrary'
+import type { MediaSource, SourceKind } from '@/types/source'
 
 defineProps<{ sources: MediaSource[] }>()
 const emit = defineEmits<{
@@ -11,10 +12,37 @@ const emit = defineEmits<{
   browse: [source: MediaSource]
 }>()
 
+const { fileScan } = useLibrary()
+const FILE_KINDS: SourceKind[] = ['local', 'webdav', 'smb', 'dlna']
+const isFile = (k: SourceKind) => FILE_KINDS.includes(k)
+
 const statusText: Record<MediaSource['status'], string> = {
   online: '在线',
   offline: '离线',
   connecting: '连接中'
+}
+
+// 文件源用实时扫描状态；Emby/Jellyfin 用连接状态
+function statusFor(s: MediaSource): { text: string; cls: string } {
+  if (isFile(s.kind)) {
+    const sc = fileScan[s.id]
+    if (!sc) return { text: '待扫描', cls: 'connecting' }
+    if (sc.scanning) return { text: '扫描中', cls: 'connecting' }
+    if (sc.error) return { text: '失败', cls: 'error' }
+    return { text: '在线', cls: 'online' }
+  }
+  return { text: statusText[s.status], cls: s.status }
+}
+function countFor(s: MediaSource): string {
+  if (isFile(s.kind)) {
+    const sc = fileScan[s.id]
+    if (sc?.scanning) return '…'
+    return (sc?.count ?? s.mediaCount ?? 0) + ' 视频'
+  }
+  return s.mediaCount ? s.mediaCount + ' 项' : '—'
+}
+function errorFor(s: MediaSource): string {
+  return isFile(s.kind) ? (fileScan[s.id]?.error ?? '') : ''
 }
 </script>
 
@@ -34,14 +62,15 @@ const statusText: Record<MediaSource['status'], string> = {
           <span class="src__badge">{{ sourceKindMeta(s.kind).label }}</span>
         </div>
         <div class="src__addr">{{ s.address }}</div>
+        <div v-if="errorFor(s)" class="src__err" :title="errorFor(s)">扫描失败：{{ errorFor(s) }}</div>
       </div>
 
-      <div class="src__status" :class="s.status">
+      <div class="src__status" :class="statusFor(s).cls">
         <span class="src__dot" />
-        {{ statusText[s.status] }}
+        {{ statusFor(s).text }}
       </div>
 
-      <div class="src__count">{{ s.mediaCount ? s.mediaCount + ' 项' : '—' }}</div>
+      <div class="src__count">{{ countFor(s) }}</div>
 
       <label class="switch" :title="s.enabled ? '已启用' : '已停用'" @click.stop>
         <input type="checkbox" :checked="s.enabled" @change="emit('toggle', s.id)" />
@@ -116,6 +145,14 @@ const statusText: Record<MediaSource['status'], string> = {
   color: var(--text-mute);
   font-family: 'SF Mono', ui-monospace, monospace;
 }
+.src__err {
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: #ff8b8b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .src__status {
   display: flex;
@@ -148,6 +185,12 @@ const statusText: Record<MediaSource['status'], string> = {
 }
 .src__status.connecting .src__dot {
   background: #ffce53;
+}
+.src__status.error {
+  color: #ff6b6b;
+}
+.src__status.error .src__dot {
+  background: #ff6b6b;
 }
 
 .src__count {

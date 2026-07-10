@@ -3,7 +3,7 @@
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
-const APP_VERSION = '0.1.9'
+const APP_VERSION = __APP_VERSION__ // 构建时注入自 package.json（见 vite.config）
 
 function getDeviceId(): string {
   const KEY = 'neko-device-id'

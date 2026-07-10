@@ -1,10 +1,22 @@
 <script setup lang="ts">
-import { Layers, Server } from 'lucide-vue-next'
+import type { Component } from 'vue'
+import { Layers, Server, HardDrive, Cloud, Network, Cast } from 'lucide-vue-next'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
+import type { SourceKind } from '@/types/source'
 
 const { sources } = useSources()
 const { activeSourceId, setActiveSource } = useLibrary()
+
+const kindIcon: Partial<Record<SourceKind, Component>> = {
+  local: HardDrive,
+  webdav: Cloud,
+  smb: Network,
+  dlna: Cast
+}
+function iconFor(kind: SourceKind): Component {
+  return kindIcon[kind] ?? Server
+}
 </script>
 
 <template>
@@ -24,7 +36,7 @@ const { activeSourceId, setActiveSource } = useLibrary()
       :class="{ on: activeSourceId === s.id }"
       @click="setActiveSource(s.id)"
     >
-      <Server :size="16" />
+      <component :is="iconFor(s.kind)" :size="16" />
       {{ s.name }}
       <span v-if="!s.enabled" class="stab__off">停用</span>
     </button>

@@ -13,6 +13,16 @@ const router = useRouter()
 const { sources, addSource, updateSource, toggleSource, removeSource } = useSources()
 const { setActiveSource, loadFromEmby } = useLibrary()
 
+// 新增/编辑源后都要重新聚合媒体库（否则文件源加了却不扫描、编辑了连接也不生效）
+function onAdd(s: MediaSource) {
+  addSource(s)
+  loadFromEmby()
+}
+function onUpdate(s: MediaSource) {
+  updateSource(s)
+  loadFromEmby()
+}
+
 // 删除媒体源：先二次确认，确认后再移除并重新聚合剩余源
 const pendingRemove = ref<MediaSource | null>(null)
 function remove(id: string) {
@@ -47,6 +57,7 @@ function closeDialog() {
   editing.value = null
 }
 function browse(source: MediaSource) {
+  // 所有源（含本机存储）都进聚合媒体库，按该源过滤（本机视频已并入库）
   setActiveSource(source.id)
   router.push('/')
 }
@@ -88,8 +99,8 @@ function browse(source: MediaSource) {
       :open="dialogOpen"
       :editing="editing"
       @close="closeDialog"
-      @add="addSource"
-      @update="updateSource"
+      @add="onAdd"
+      @update="onUpdate"
     />
 
     <ConfirmDialog
@@ -108,7 +119,7 @@ function browse(source: MediaSource) {
 .sources {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
 }
 .sources__head {
   display: flex;

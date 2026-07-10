@@ -52,9 +52,14 @@ function isActive(name: string) {
   flex-shrink: 0;
   padding: 18px 0 20px;
   gap: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-  border-right: 1px solid var(--border);
-  backdrop-filter: var(--blur);
+  /* 极淡的左侧染色，向右渐隐为透明 → 没有硬边/边线，和内容区柔和相接（不突兀） */
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.012) 60%, transparent);
+  /* 侧栏空白处也可拖动窗口（按钮/链接下面设了 no-drag） */
+  -webkit-app-region: drag;
+}
+.rail__logo,
+.rail__item {
+  -webkit-app-region: no-drag;
 }
 
 .rail__logo {

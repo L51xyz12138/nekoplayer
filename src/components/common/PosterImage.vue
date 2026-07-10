@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useSettings } from '@/composables/useSettings'
+
+const { settings } = useSettings()
 
 const props = withDefaults(
   defineProps<{
@@ -11,12 +14,30 @@ const props = withDefaults(
     label?: string
     /** 真实图片 URL；提供且加载成功时优先显示，否则回退 SVG 占位 */
     src?: string
+    /** 本机视频路径；无 src 时向主进程要 mpv 抽帧缩略图当封面 */
+    localPath?: string
   }>(),
   { title: '', kind: 'poster', label: '', src: '' }
 )
 
 const failed = ref(false)
-const useImage = computed(() => !!props.src && !failed.value)
+const localThumb = ref('')
+watch(
+  () => props.localPath,
+  async (p) => {
+    if (p && !props.src) {
+      try {
+        // 传渲染进程里配置的 mpv 路径（与播放同源，避免主进程读不到设置而回退到 PATH mpv.exe）
+        localThumb.value = (await window.nekoNative?.getThumb?.(p, settings.playerPaths.mpv || '')) || ''
+      } catch {
+        localThumb.value = ''
+      }
+    }
+  },
+  { immediate: true }
+)
+const resolvedSrc = computed(() => props.src || localThumb.value)
+const useImage = computed(() => !!resolvedSrc.value && !failed.value)
 
 /** FNV-1a 稳定哈希 */
 function hash(str: string): number {
@@ -59,7 +80,7 @@ const shortTitle = computed(() => {
   <img
     v-if="useImage"
     class="poster-img"
-    :src="src"
+    :src="resolvedSrc"
     :alt="title"
     loading="lazy"
     @error="failed = true"

@@ -106,6 +106,11 @@ ol {
   }
 }
 
+/* 亮色下侧栏染色（同样向右渐隐，无硬边） */
+:root[data-scheme='light'] .rail {
+  background: linear-gradient(90deg, rgba(18, 22, 33, 0.032), rgba(18, 22, 33, 0.008) 60%, transparent);
+}
+
 /* 通用工具类 */
 .clamp-2 {
   display: -webkit-box;

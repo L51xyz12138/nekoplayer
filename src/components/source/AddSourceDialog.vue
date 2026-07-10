@@ -82,11 +82,94 @@ function buildAddress() {
   return `${form.address || 'http://host'}:${form.port || m.defaultPort}`
 }
 
+async function pickFolder(key: string) {
+  const p = await window.nekoNative?.pickFolder()
+  if (p) form[key] = p
+}
+
+// DLNA：SSDP 发现局域网服务器，选一个填入 config
+const discovering = ref(false)
+const discovered = ref(false)
+const dlnaServers = ref<{ name: string; controlUrl: string }[]>([])
+async function runDiscover() {
+  discovering.value = true
+  discovered.value = false
+  dlnaServers.value = []
+  try {
+    dlnaServers.value = (await window.nekoNative?.discoverDlna?.())?.servers ?? []
+  } catch {
+    dlnaServers.value = []
+  } finally {
+    discovering.value = false
+    discovered.value = true
+  }
+}
+function pickDlna(key: string, sv: { name: string; controlUrl: string }) {
+  form[key] = sv.controlUrl
+  if (!name.value.trim()) name.value = sv.name
+}
+
+const isFileKind = computed(
+  () =>
+    kind.value === 'local' ||
+    kind.value === 'webdav' ||
+    kind.value === 'smb' ||
+    kind.value === 'dlna'
+)
+
+// 从表单收集 config，并校验必填；返回 null 表示校验未过（已设置错误提示）
+function collectConfig(): { config: Record<string, string>; address: string; derived: string } | null {
+  const config: Record<string, string> = {}
+  for (const f of meta.value.fields) config[f.key] = (form[f.key] || '').trim()
+  const missing = meta.value.fields.find((f) => f.required && !config[f.key])
+  if (missing) {
+    connectError.value = `请填写「${missing.label}」`
+    return null
+  }
+  let derived = ''
+  try {
+    if (config.url) derived = new URL(config.url).host
+  } catch {
+    /* url 非法交给后端报错 */
+  }
+  if (!derived) derived = config.address || config.path?.split(/[\\/]/).filter(Boolean).pop() || ''
+  return { config, address: config.url || config.address || config.path || '', derived }
+}
+
 async function submit() {
   connectError.value = ''
-  // 编辑：仅更新显示名，保留原有连接
+  // 编辑：文件源要把改后的连接信息一并保存（不止名称）；Emby/Jellyfin 只改名
   if (isEdit.value && props.editing) {
-    emit('update', { ...props.editing, name: name.value.trim() || props.editing.name })
+    const src = props.editing
+    if (isFileKind.value) {
+      const c = collectConfig()
+      if (!c) return
+      emit('update', {
+        ...src,
+        name: name.value.trim() || src.name,
+        address: c.address || src.address,
+        config: c.config
+      })
+    } else {
+      emit('update', { ...src, name: name.value.trim() || src.name })
+    }
+    emit('close')
+    return
+  }
+  // 文件浏览类源（本机 / WebDAV / SMB / DLNA）：免登录，直接以表单配置建源
+  if (isFileKind.value) {
+    const c = collectConfig()
+    if (!c) return
+    emit('add', {
+      id: `${kind.value}-${Date.now()}`,
+      kind: kind.value,
+      name: name.value.trim() || c.derived || meta.value.label,
+      address: c.address,
+      status: 'online',
+      mediaCount: 0,
+      enabled: true,
+      config: c.config
+    })
     emit('close')
     return
   }
@@ -158,7 +241,37 @@ async function submit() {
                 {{ f.label }}
                 <i v-if="f.required" class="req">*</i>
               </span>
-              <div v-if="f.type === 'password'" class="field__pwd">
+              <div v-if="f.type === 'folder'" class="field__folder">
+                <input
+                  v-model="form[f.key]"
+                  type="text"
+                  readonly
+                  :placeholder="f.placeholder"
+                  @click="pickFolder(f.key)"
+                />
+                <button type="button" class="field__browse" @click="pickFolder(f.key)">浏览…</button>
+              </div>
+              <div v-else-if="f.type === 'dlna'" class="field__dlna">
+                <button type="button" class="field__browse" :disabled="discovering" @click="runDiscover">
+                  {{ discovering ? '搜索中…' : '发现 DLNA 服务器' }}
+                </button>
+                <div v-if="dlnaServers.length" class="dlna-list">
+                  <button
+                    v-for="sv in dlnaServers"
+                    :key="sv.controlUrl"
+                    type="button"
+                    class="dlna-item"
+                    :class="{ on: form[f.key] === sv.controlUrl }"
+                    @click="pickDlna(f.key, sv)"
+                  >
+                    {{ sv.name }}
+                  </button>
+                </div>
+                <p v-else-if="discovered" class="dlna-hint">
+                  没搜到服务器（确认在同一局域网、DLNA/UPnP 已开启）
+                </p>
+              </div>
+              <div v-else-if="f.type === 'password'" class="field__pwd">
                 <input
                   v-model="form[f.key]"
                   :type="showPwd ? 'text' : 'password'"
@@ -184,7 +297,15 @@ async function submit() {
         <footer class="dialog__foot">
           <button class="btn btn--ghost" @click="emit('close')">取消</button>
           <button class="btn btn--primary" :disabled="submitting" @click="submit">
-            {{ isEdit ? '保存更改' : submitting ? '连接中…' : '保存并连接' }}
+            {{
+              isEdit
+                ? '保存更改'
+                : isFileKind
+                  ? '添加'
+                  : submitting
+                    ? '连接中…'
+                    : '保存并连接'
+            }}
           </button>
         </footer>
       </div>
@@ -367,6 +488,66 @@ async function submit() {
 }
 .field input:focus {
   border-color: var(--accent);
+}
+.field__folder {
+  display: flex;
+  gap: 10px;
+}
+.field__folder input {
+  cursor: pointer;
+}
+.field__browse {
+  flex-shrink: 0;
+  padding: 0 16px;
+  height: 44px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.field__browse:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.field__browse:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.field__dlna {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dlna-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dlna-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  transition: color var(--dur), border-color var(--dur), background var(--dur);
+}
+.dlna-item:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.dlna-item.on {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+}
+.dlna-hint {
+  font-size: 12.5px;
+  color: var(--text-mute);
 }
 .field__pwd {
   position: relative;

@@ -15,6 +15,9 @@ buildResources/icon.png
 .env.local
 .env.*.local
 
+# 项目 AI 迭代指南（供本地 AI 阅览，勿上传）
+CLAUDE.md
+
 # 日志
 *.log
 npm-debug.log*

@@ -22,6 +22,10 @@ export interface Episode {
   /** 单集时长（分钟） */
   runtime: number
   overview: string
+  /** 文件源分集的可播路径（有则为本地/网络文件分集，直接外部播放器播） */
+  localPath?: string
+  /** 文件源分集所在文件夹（供文件夹视图） */
+  folder?: string
   /** 观看进度 0-1 */
   progress?: number
   /** 续播位置（Emby ticks，1 秒=10^7）；比 progress 精确，用于 seek */
@@ -95,6 +99,14 @@ export interface MediaItem {
   posterUrl?: string
   /** 真实背景图 URL */
   backdropUrl?: string
+  /** 本机存储类源的视频文件绝对路径；有则为本地视频（用外部播放器直接播、封面走 mpv 抽帧） */
+  localPath?: string
+  /** 文件源视频在源内的相对文件夹（'/' 分隔，根为 ''），供文件夹层级浏览 */
+  folder?: string
+  /** 文件源视频已成功刮削到 TMDB 元数据（有则展示海报/年份/评分，无则展示缩略图） */
+  scraped?: boolean
+  /** 文件源剧集分集信息（从文件名解析）；有则该文件是某剧的一集，会被聚合成剧集 */
+  episodeInfo?: { show: string; season: number; episode: number; epTitle: string }
 }
 
 /** 媒体文件技术信息 */

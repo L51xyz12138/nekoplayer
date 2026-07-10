@@ -79,12 +79,12 @@ watch(
         @keydown.space.prevent="emit('play', ep)"
       >
         <div class="ep__thumb">
-          <PosterImage :seed="ep.stillSeed" :src="ep.stillUrl" kind="still" />
+          <PosterImage :seed="ep.stillSeed" :src="ep.stillUrl" :local-path="ep.localPath" kind="still" />
           <div class="ep__scrim" />
           <button class="ep__play"><Play :size="18" fill="currentColor" /></button>
           <span v-if="ep.id === resumeId" class="ep__badge ep__badge--resume">续看</span>
           <span v-else class="ep__badge">第 {{ ep.episode }} 集</span>
-          <span class="ep__dur">{{ ep.runtime }} 分钟</span>
+          <span v-if="ep.runtime" class="ep__dur">{{ ep.runtime }} 分钟</span>
           <div v-if="ep.progress" class="ep__bar"><span :style="{ width: ep.progress * 100 + '%' }" /></div>
         </div>
         <div class="ep__info">

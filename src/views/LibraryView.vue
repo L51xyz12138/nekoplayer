@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { FolderTree, LayoutGrid } from 'lucide-vue-next'
 import TopBar from '@/components/layout/TopBar.vue'
 import SourceTabs from '@/components/library/SourceTabs.vue'
 import LibraryTabs from '@/components/library/LibraryTabs.vue'
@@ -10,7 +11,9 @@ import PosterGrid from '@/components/library/PosterGrid.vue'
 import PosterCard from '@/components/library/PosterCard.vue'
 import ContinueCard from '@/components/library/ContinueCard.vue'
 import SkeletonCard from '@/components/library/SkeletonCard.vue'
+import FolderBrowser from '@/components/library/FolderBrowser.vue'
 import { useLibrary } from '@/composables/useLibrary'
+import { useSources } from '@/composables/useSources'
 import { useEmby } from '@/composables/useEmby'
 import { usePlayer } from '@/composables/usePlayer'
 import type { MediaItem } from '@/types/media'
@@ -18,6 +21,7 @@ import type { MediaItem } from '@/types/media'
 const router = useRouter()
 
 const { error: connectError } = useEmby()
+const { getSource } = useSources()
 
 const {
   items,
@@ -35,13 +39,29 @@ const {
   featured,
   loading,
   error,
+  activeSourceId,
+  bySource,
+  fileViewMode,
+  setFileViewMode,
   toggleFavorite,
   setQuery,
   setCategory,
   setSort
 } = useLibrary()
 
+// 文件源「库视图」用的网格：当前源全部条目按标题排序
+const fileGridItems = computed(() =>
+  [...bySource.value].sort((a, b) => a.title.localeCompare(b.title, 'zh'))
+)
+
 const player = usePlayer()
+
+// 当前选中的是「文件浏览类源」（本机/WebDAV/SMB/DLNA）→ 默认视图走文件夹层级浏览
+const FILE_KINDS = ['local', 'webdav', 'smb', 'dlna']
+const activeFileSource = computed(() => {
+  const s = getSource(activeSourceId.value)
+  return s && FILE_KINDS.includes(s.kind) ? s : null
+})
 
 // 有搜索、切到具体分类、或启用了筛选时，都改为展示「筛选/结果网格」而非首页浏览布局
 const browseMode = computed(
@@ -113,7 +133,35 @@ function play(item: MediaItem) {
 
       <!-- 正常内容 -->
       <template v-else>
-        <template v-if="browseMode">
+        <!-- 文件源：文件夹层级浏览 / 库网格 可切换（搜索/切分类时仍回退到下方结果网格） -->
+        <div v-if="activeFileSource && browseMode" class="library__body library__body--filter">
+          <div class="viewtoggle">
+            <button
+              class="viewtoggle__btn"
+              :class="{ on: fileViewMode === 'folder' }"
+              @click="setFileViewMode('folder')"
+            >
+              <FolderTree :size="15" /> 文件夹
+            </button>
+            <button
+              class="viewtoggle__btn"
+              :class="{ on: fileViewMode === 'library' }"
+              @click="setFileViewMode('library')"
+            >
+              <LayoutGrid :size="15" /> 库视图
+            </button>
+          </div>
+          <FolderBrowser
+            v-if="fileViewMode === 'folder'"
+            :items="bySource"
+            :root-name="activeFileSource.name"
+            @favorite="toggleFavorite"
+            @play="play"
+          />
+          <PosterGrid v-else :items="fileGridItems" @favorite="toggleFavorite" @play="play" />
+        </div>
+
+        <template v-else-if="browseMode">
           <div v-if="featured" class="library__hero">
             <HeroBanner :item="featured" @play="play" />
           </div>
@@ -161,7 +209,7 @@ function play(item: MediaItem) {
 .library {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
 }
 .library__topbar {
   flex-shrink: 0;
@@ -180,6 +228,34 @@ function play(item: MediaItem) {
 }
 .library__body--filter {
   padding-top: 8px;
+}
+
+.viewtoggle {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+.viewtoggle__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-radius: var(--r-pill);
+  transition: color var(--dur), background var(--dur);
+}
+.viewtoggle__btn:hover {
+  color: var(--text);
+}
+.viewtoggle__btn.on {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 
 .library__state {

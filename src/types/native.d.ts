@@ -40,6 +40,40 @@ export interface NekoNative {
   storeSet(key: string, val: string): void
   /** 删持久化存储 */
   storeRemove(key: string): void
+  /** 选择文件夹（添加本机存储源）；取消返回 null */
+  pickFolder(): Promise<string | null>
+  /** 递归扫描本机目录下所有视频（path 为本地绝对路径） */
+  scanVideos(root: string): Promise<{ videos?: NekoVideoFile[]; error?: string }>
+  /** 递归列 WebDAV 视频（path 为带认证的直链） */
+  scanWebdav(config: Record<string, string>): Promise<{ videos?: NekoVideoFile[]; error?: string }>
+  /** 递归扫 SMB 共享视频（Windows，path 为 UNC 路径） */
+  scanSmb(config: Record<string, string>): Promise<{ videos?: NekoVideoFile[]; error?: string }>
+  /** SSDP 发现局域网 DLNA 媒体服务器 */
+  discoverDlna(): Promise<{ servers?: DlnaServer[]; error?: string }>
+  /** 递归浏览 DLNA 服务器的视频（path 为 http res 直链） */
+  scanDlna(config: Record<string, string>): Promise<{ videos?: NekoVideoFile[]; error?: string }>
+  /** 取视频缩略图（自带 mpv 抽帧+缓存），返回 base64 data URL；失败返回 null */
+  getThumb(file: string, mpvPath?: string): Promise<string | null>
+  /** 检查 mpv 是否可用（传入自定义路径优先）；ok=false 表示需用户填路径 */
+  checkMpv(mpvPath?: string): Promise<{ ok: boolean; path: string }>
+  /** 亮/暗切换时同步标题栏悬浮窗口按钮区的配色（仅 Windows 生效） */
+  setTitlebarTheme(light: boolean): void
+}
+
+/** 发现到的 DLNA 服务器 */
+export interface DlnaServer {
+  name: string
+  controlUrl: string
+}
+
+/** 递归扫描到的视频文件 */
+export interface NekoVideoFile {
+  name: string
+  path: string
+  size: number
+  mtime: number
+  /** 相对于源根的所在文件夹（'/' 分隔，根目录为 ''），供文件夹层级浏览 */
+  dir?: string
 }
 
 declare global {

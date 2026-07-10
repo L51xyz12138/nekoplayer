@@ -1,10 +1,20 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdir, readFile, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { tmpdir, networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import dgram from 'node:dgram'
+import { createClient } from 'webdav'
+
+// 可播放的视频扩展名（本机/文件浏览类源用）
+const VIDEO_EXT = new Set([
+  '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts', '.m2ts',
+  '.mpg', '.mpeg', '.rmvb', '.rm', '.3gp', '.vob', '.ogv', '.divx', '.f4v', '.mts'
+])
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = !app.isPackaged
@@ -174,6 +184,33 @@ async function reportMpvProgress(emby, posSeconds) {
   }
 }
 
+// 播放设置 → mpv 参数（音轨/字幕语言、字幕外观、硬解、倍速、跳章节）
+function mpvSettingArgs() {
+  let s = {}
+  try {
+    s = JSON.parse(persistStore['neko-settings'] || '{}')
+  } catch {
+    /* ignore */
+  }
+  const args = []
+  const alang = { 中文: 'chi,zh,zho,chs', 日文: 'jpn,jp', 英文: 'eng,en' }[s.audioLang]
+  if (alang) args.push(`--alang=${alang}`)
+  if (s.subLang === '关闭') args.push('--sid=no')
+  else {
+    const slang = { 中文: 'chi,zh,chs,sc,zho,cht', 英文: 'eng,en' }[s.subLang]
+    if (slang) args.push(`--slang=${slang}`)
+  }
+  const size = { 小: 44, 中: 55, 大: 72 }[s.subSize]
+  if (size) args.push(`--sub-font-size=${size}`)
+  if (s.subColor) args.push(`--sub-color=${s.subColor}`)
+  if (s.subOutline === false) args.push('--sub-border-size=0')
+  if (s.hwdecode === false) args.push('--hwdec=no')
+  if (s.rate && Number(s.rate) !== 1) args.push(`--speed=${s.rate}`)
+  // 用 -append 避免覆盖 mpv.conf / uosc 等已有的 script-opts
+  if (s.skipIntro) args.push('--script-opts-append=skipchapters-enabled=yes')
+  return args
+}
+
 // 渲染进程请求用 mpv 播放（items: [{ url, title }]）
 ipcMain.handle('play-mpv', (_e, payload) => {
   const { items, title, startIndex, mpvPath, startSec, emby } = payload || {}
@@ -203,7 +240,9 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     '--autofit-larger=90%x90%',
     '--geometry=50%:50%',
     `--config-dir=${MPV_CONFIG_DIR}`,
-    `--input-ipc-server=${ipcSocket}`
+    `--input-ipc-server=${ipcSocket}`,
+    // 音轨/字幕/跳章节等按设置（放在默认项之后，同名参数后者覆盖）
+    ...mpvSettingArgs()
   ]
   // 从上次进度续播
   if (typeof startSec === 'number' && startSec > 0) args.push(`--start=${startSec}`)
@@ -308,6 +347,471 @@ ipcMain.handle('play-external', (_e, payload) => {
   return openExternal(player, url, appPath, startSec)
 })
 
+// 选择文件夹（添加本机存储源时用）
+ipcMain.handle('pick-folder', async () => {
+  const r = await dialog.showOpenDialog(mainWin ?? undefined, { properties: ['openDirectory'] })
+  return r.canceled || !r.filePaths.length ? null : r.filePaths[0]
+})
+
+// 递归扫描目录下所有视频（本机源进媒体库用）；限深/限量，避免超大目录卡死
+async function scanVideos(dir, out, depth, base = dir) {
+  if (out.length >= 4000 || depth > 8) return
+  let dirents
+  try {
+    dirents = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  // 当前目录相对源根的路径（'/' 分隔），供文件夹层级浏览
+  const rel = path.relative(base, dir).replace(/\\/g, '/')
+  for (const ent of dirents) {
+    if (ent.name.startsWith('.')) continue
+    if (out.length >= 4000) return
+    const full = path.join(dir, ent.name)
+    if (ent.isDirectory()) {
+      await scanVideos(full, out, depth + 1, base)
+    } else if (VIDEO_EXT.has(path.extname(ent.name).toLowerCase())) {
+      let size = 0
+      let mtime = 0
+      try {
+        const st = await stat(full)
+        size = st.size
+        mtime = st.mtimeMs
+      } catch {
+        /* ignore */
+      }
+      out.push({ name: ent.name, path: full, size, mtime, dir: rel })
+    }
+  }
+}
+ipcMain.handle('scan-videos', async (_e, root) => {
+  if (!root) return { error: '路径为空' }
+  const out = []
+  try {
+    await scanVideos(root, out, 0)
+    return { videos: out }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
+
+// WebDAV：递归列目录，视频返回带认证的直链（供外部播放器/抽帧）
+ipcMain.handle('scan-webdav', async (_e, config) => {
+  const { url, username, password, path: rootPath } = config || {}
+  if (!url) return { error: '缺少 WebDAV 地址' }
+  try {
+    const client = createClient(url, username ? { username, password } : {})
+    const videos = []
+    // 规范化路径 + 求相对源根的文件夹（供文件夹层级浏览）
+    const norm = (p) => ('/' + p).replace(/\/+/g, '/').replace(/\/+$/, '') || '/'
+    const rootBase = norm(rootPath || '/')
+    const relUnder = (d) => {
+      let f = norm(d)
+      if (rootBase !== '/' && f.startsWith(rootBase)) f = f.slice(rootBase.length)
+      return f.replace(/^\/+/, '')
+    }
+    // 逐层递归（每次 Depth:1）：比 deep:true（Depth:infinity）兼容更多服务器（不少服务器禁用无限深度）
+    const walk = async (dir, depth) => {
+      if (depth > 8 || videos.length >= 4000) return
+      const items = await client.getDirectoryContents(dir)
+      const list = Array.isArray(items) ? items : items.data
+      const rel = relUnder(dir)
+      for (const it of list) {
+        if (videos.length >= 4000) break
+        if (it.type === 'directory') {
+          // 跳过「自身」条目（部分服务器会把当前目录也列出）以防死循环
+          const self = it.filename.replace(/\/+$/, '') === String(dir).replace(/\/+$/, '')
+          if (!self) await walk(it.filename, depth + 1)
+        } else if (VIDEO_EXT.has(path.extname(it.basename).toLowerCase())) {
+          videos.push({
+            name: it.basename,
+            // 带 basic auth 的直链，外部播放器可直接播
+            path: client.getFileDownloadLink(it.filename),
+            size: it.size || 0,
+            mtime: it.lastmod ? Date.parse(it.lastmod) : 0,
+            dir: rel
+          })
+        }
+      }
+    }
+    await walk(rootPath || '/', 0)
+    return { videos }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
+
+// SMB：Windows 走 UNC 路径（必要时 net use 建立带凭据的连接），再用 fs 递归扫描
+ipcMain.handle('scan-smb', async (_e, config) => {
+  if (process.platform !== 'win32') return { error: 'SMB 目前仅支持 Windows（UNC 路径）' }
+  const { path: subPath, username, password } = config || {}
+  let address = (config?.address || '').trim()
+  if (!address) return { error: '缺少共享地址（如 \\\\192.168.1.10\\media）' }
+  // 规范化：正斜杠转反斜杠、补齐开头的 \\（用户可能只填 192.168.x.x\share）
+  address = address.replace(/\//g, '\\')
+  if (!address.startsWith('\\\\')) address = '\\\\' + address.replace(/^\\+/, '')
+  // UNC 不支持端口：\\host:445\share 会把 host:445 当成主机名 → 找不到网络名(67)，去掉主机后的 :端口
+  address = address.replace(/^(\\\\[^\\]+?):\d+(?=\\|$)/, '$1')
+  // 必须带共享名：\\主机\共享名。只填 \\主机 无法枚举（readdir 报 ENOENT）
+  const segs = address.replace(/^\\+/, '').split('\\').filter(Boolean)
+  if (segs.length < 2 && !subPath) {
+    return {
+      error: `地址缺少共享名，请填 \\\\主机\\共享名（如 \\\\${segs[0] || '192.168.0.113'}\\共享文件夹）。共享名可在 NAS 的 SMB/文件共享设置里查看`
+    }
+  }
+  // 有凭据则先建立连接（已用别的账号连过会报 1219，此时忽略、直接尝试访问）
+  let netMsg = ''
+  if (username) {
+    netMsg = await new Promise((res) => {
+      // stdio inherit：把 net use 的真实报错（GBK 中文）直接打到运行 electron 的终端，便于定位
+      const p = spawn('net', ['use', address, password || '', `/user:${username}`], {
+        windowsHide: true,
+        stdio: ['ignore', 'inherit', 'inherit']
+      })
+      p.on('exit', (code) => res(code === 0 ? '' : `net use 退出码 ${code}`))
+      p.on('error', (e) => res(e.message))
+    })
+  }
+  const root = subPath ? path.join(address, subPath) : address
+  // 先测试能否访问根目录，失败就明确报错（否则 scanVideos 会静默返回空 → 看着像“没视频”）
+  try {
+    await readdir(root)
+  } catch (e) {
+    return {
+      error: `无法访问 ${root}：${e.code || e.message}。若资源管理器能打开该服务器却在此失败，多半是「共享名」不对——请用资源管理器里看到的文件夹名（不是设备名/IP）；也确认账号密码${netMsg ? `（${netMsg}）` : ''}`
+    }
+  }
+  const out = []
+  try {
+    await scanVideos(root, out, 0)
+    return { videos: out }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
+
+// ---------- DLNA / UPnP（SSDP 发现 + ContentDirectory SOAP Browse）----------
+function unescapeXml(s) {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, '&')
+}
+// 从设备描述 XML 里取 friendlyName + ContentDirectory 的绝对 controlURL
+async function parseDlnaDescription(location) {
+  try {
+    const xml = await (await fetch(location)).text()
+    const svc = xml.split(/<service>/i).find((s) => /ContentDirectory/i.test(s))
+    const ctrl = svc?.match(/<controlURL>\s*([^<]+)\s*<\/controlURL>/i)?.[1]?.trim()
+    if (!ctrl) return null
+    const name = xml.match(/<friendlyName>\s*([^<]+)\s*<\/friendlyName>/i)?.[1]?.trim() || 'DLNA'
+    const base = xml.match(/<URLBase>\s*([^<]+)\s*<\/URLBase>/i)?.[1]?.trim() || new URL(location).origin
+    return { name, controlUrl: new URL(ctrl, base).href }
+  } catch {
+    return null
+  }
+}
+// SSDP M-SEARCH 发现局域网 DLNA 媒体服务器
+// 从每个真实网卡各发一遍、并用多个 ST（Windows 多网卡/虚拟网卡时组播易发错口，故遍历所有网卡）
+function discoverDlna(timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    const results = []
+    const seen = new Set()
+    const pending = []
+    const sockets = []
+    const STs = [
+      'urn:schemas-upnp-org:service:ContentDirectory:1',
+      'urn:schemas-upnp-org:device:MediaServer:1',
+      'ssdp:all'
+    ]
+    const onMessage = (buf) => {
+      const loc = buf.toString().match(/LOCATION:\s*(\S+)/i)?.[1]
+      if (loc && !seen.has(loc)) {
+        seen.add(loc)
+        pending.push(
+          parseDlnaDescription(loc).then((info) => {
+            if (info && !results.some((r) => r.controlUrl === info.controlUrl)) results.push(info)
+          })
+        )
+      }
+    }
+    // 收集所有非内网 IPv4 地址（各网卡各绑一个 socket 发送，绕开虚拟网卡路由问题）
+    const addrs = []
+    for (const list of Object.values(networkInterfaces())) {
+      for (const ni of list || []) {
+        if (ni.family === 'IPv4' && !ni.internal) addrs.push(ni.address)
+      }
+    }
+    if (!addrs.length) addrs.push('0.0.0.0')
+    for (const addr of addrs) {
+      const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true })
+      sock.on('message', onMessage)
+      sock.on('error', () => {
+        try {
+          sock.close()
+        } catch {
+          /* ignore */
+        }
+      })
+      sock.bind(0, addr, () => {
+        try {
+          sock.setBroadcast(true)
+          for (const st of STs) {
+            const msg = Buffer.from(
+              'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\nST: ' +
+                st +
+                '\r\n\r\n'
+            )
+            sock.send(msg, 1900, '239.255.255.250')
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+      sockets.push(sock)
+    }
+    setTimeout(async () => {
+      for (const s of sockets) {
+        try {
+          s.close()
+        } catch {
+          /* ignore */
+        }
+      }
+      await Promise.allSettled(pending)
+      resolve(results)
+    }, timeoutMs)
+  })
+}
+async function soapBrowse(controlUrl, objectId, start, count) {
+  const body =
+    '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" ' +
+    's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>' +
+    '<u:Browse xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1">' +
+    `<ObjectID>${objectId}</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>` +
+    `<Filter>*</Filter><StartingIndex>${start}</StartingIndex><RequestedCount>${count}</RequestedCount>` +
+    '<SortCriteria></SortCriteria></u:Browse></s:Body></s:Envelope>'
+  const text = await (
+    await fetch(controlUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset="utf-8"',
+        SOAPAction: '"urn:schemas-upnp-org:service:ContentDirectory:1#Browse"'
+      },
+      body
+    })
+  ).text()
+  return {
+    didl: unescapeXml(text.match(/<Result>([\s\S]*?)<\/Result>/i)?.[1] ?? ''),
+    total: parseInt(text.match(/<TotalMatches>(\d+)<\/TotalMatches>/i)?.[1] || '0', 10),
+    num: parseInt(text.match(/<NumberReturned>(\d+)<\/NumberReturned>/i)?.[1] || '0', 10)
+  }
+}
+async function browseDlna(controlUrl, objectId, out, depth, dirPath = '') {
+  if (depth > 8 || out.length >= 4000) return
+  let start = 0
+  for (;;) {
+    let r
+    try {
+      r = await soapBrowse(controlUrl, objectId, start, 200)
+    } catch {
+      return
+    }
+    if (!r.didl) return
+    // 容器标题映射（尽力而为，取不到就用 id）——供文件夹层级浏览
+    const titles = {}
+    for (const m of r.didl.matchAll(/<container\b([^>]*)>([\s\S]*?)<\/container>/gi)) {
+      const cid = m[1].match(/\bid=["']([^"']+)["']/i)?.[1]
+      if (cid) titles[cid] = unescapeXml(m[2].match(/<dc:title>([^<]*)<\/dc:title>/i)?.[1] || '')
+    }
+    // 直接子容器 → 递归（用「开始标签」正则取 id 更稳，绝不漏容器/视频）
+    for (const c of r.didl.matchAll(/<container\b[^>]*\bid=["']([^"']+)["'][^>]*>/gi)) {
+      const id = c[1]
+      const title = titles[id] || id
+      await browseDlna(controlUrl, id, out, depth + 1, dirPath ? dirPath + '/' + title : title)
+      if (out.length >= 4000) return
+    }
+    // 视频条目
+    for (const it of r.didl.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+      const block = it[1]
+      if (!/videoItem/i.test(block.match(/<upnp:class>([^<]+)<\/upnp:class>/i)?.[1] || '')) continue
+      const res = block.match(/<res\b([^>]*)>([^<]+)<\/res>/i)
+      if (!res) continue
+      out.push({
+        name: unescapeXml(block.match(/<dc:title>([^<]*)<\/dc:title>/i)?.[1] || '视频'),
+        path: unescapeXml(res[2].trim()),
+        size: parseInt(res[1].match(/size=["'](\d+)["']/i)?.[1] || '0', 10),
+        mtime: 0,
+        dir: dirPath
+      })
+      if (out.length >= 4000) return
+    }
+    start += r.num
+    if (!r.num || start >= r.total) return
+  }
+}
+ipcMain.handle('discover-dlna', async () => {
+  try {
+    return { servers: await discoverDlna() }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
+ipcMain.handle('scan-dlna', async (_e, config) => {
+  const controlUrl = config?.controlUrl
+  if (!controlUrl) return { error: '缺少 DLNA 服务器（请先发现并选择）' }
+  const out = []
+  try {
+    await browseDlna(controlUrl, '0', out, 0)
+    // 同一视频可能出现在多个容器（如「所有视频」+「文件夹」），按直链去重
+    const seen = new Set()
+    return { videos: out.filter((v) => !seen.has(v.path) && seen.add(v.path)) }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
+
+// ---------- 视频缩略图（自带 mpv 无头抽一帧，缓存到 userData/thumbs）----------
+const THUMB_DIR = path.join(app.getPath('userData'), 'thumbs')
+try {
+  mkdirSync(THUMB_DIR, { recursive: true })
+} catch {
+  /* ignore */
+}
+function thumbPathFor(file) {
+  return path.join(THUMB_DIR, createHash('md5').update(file).digest('hex') + '.jpg')
+}
+let thumbActive = 0
+const thumbQueue = []
+function runThumbQueue() {
+  while (thumbActive < 3 && thumbQueue.length) {
+    const job = thumbQueue.shift()
+    thumbActive++
+    genThumb(job.file, job.out, job.mpvPath).finally(() => {
+      thumbActive--
+      job.done()
+      runThumbQueue()
+    })
+  }
+}
+// 缩略图与播放用同一个 mpv：优先设置里配的自定义路径（从文件存储读）
+function settingsMpvPath() {
+  try {
+    return JSON.parse(persistStore['neko-settings'] || '{}').playerPaths?.mpv || ''
+  } catch {
+    return ''
+  }
+}
+function genThumb(file, out, mpvPath) {
+  return new Promise((resolve) => {
+    // 优先用渲染进程传来的 mpv 路径（与播放同源），退回设置文件里的，再退回自带/PATH
+    const mpvBin = resolveMpv(mpvPath || settingsMpvPath())
+    const args = [
+      file,
+      '--no-config',
+      '--really-quiet',
+      '--no-audio',
+      '--frames=1',
+      '--start=20%',
+      '--vf=scale=480:-2',
+      // MJPEG 默认要全范围 YUV；新版 ffmpeg 弃用了 yuvj420p 格式名（format=yuvj420p 会被静默忽略、
+      // 仍是 yuv420p → "Could not initialize encoder"），改用 strict=-1 让编码器接受非全范围 YUV
+      '--ovcopts=strict=-1',
+      `--o=${out}`
+    ]
+    let done = false
+    let err = ''
+    const finish = () => {
+      if (done) return
+      done = true
+      // 没生成文件就把 mpv 的报错打到主控制台，方便定位（mpv 路径错/编码失败/无法读源等）
+      if (!existsSync(out)) {
+        console.warn('[neko-thumb] 抽帧失败 file=%s\n  mpv=%s\n  %s', file, mpvBin, err.trim().slice(-600))
+      }
+      resolve()
+    }
+    try {
+      const p = spawn(mpvBin, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+      p.stderr?.on('data', (d) => (err += d.toString()))
+      p.on('exit', finish)
+      p.on('error', (e) => {
+        err += e.message
+        finish()
+      })
+      setTimeout(() => {
+        try {
+          p.kill()
+        } catch {
+          /* ignore */
+        }
+        finish()
+      }, 15000) // 抽帧超时保护
+    } catch (e) {
+      err += e.message
+      finish()
+    }
+  })
+}
+ipcMain.handle('get-thumb', async (_e, payload) => {
+  const { file, mpvPath } =
+    typeof payload === 'string' ? { file: payload, mpvPath: '' } : payload || {}
+  if (!file) return null
+  const out = thumbPathFor(file)
+  if (!existsSync(out)) {
+    await new Promise((done) => {
+      thumbQueue.push({ file, out, mpvPath, done })
+      runThumbQueue()
+    })
+  }
+  if (!existsSync(out)) return null
+  // 返回 base64 data URL，避免 dev（http 源）下 file:// 图被拦
+  try {
+    return 'data:image/jpeg;base64,' + (await readFile(out)).toString('base64')
+  } catch {
+    return null
+  }
+})
+
+// 检查 mpv 是否可用（供设置页提示用户是否需要填路径）：返回解析到的真实可执行文件
+ipcMain.handle('check-mpv', (_e, mpvPath) => {
+  const resolved = resolveMpv(mpvPath || settingsMpvPath())
+  const ok = existsSync(resolved)
+  return { ok, path: ok ? resolved : '' }
+})
+
+// 标题栏悬浮按钮区的配色（跟随亮/暗）：与 theme.css 的 --bg-1 一致
+// 与 App 背景渐变的「顶色」(theme.css 的 --bg-0) 一致，让右上角悬浮按钮区尽量融入内容
+function titlebarColors(light) {
+  return light
+    ? { color: '#e9edf4', symbolColor: '#48505f', height: 44 }
+    : { color: '#06070b', symbolColor: '#c9d1e4', height: 44 }
+}
+// 启动时按已存设置推断亮/暗，避免建窗时用错色导致闪一下
+function initialLight() {
+  try {
+    const scheme = JSON.parse(persistStore['neko-settings'] || '{}').colorScheme
+    if (scheme === '亮色') return true
+    if (scheme === '暗色') return false
+    return !nativeTheme.shouldUseDarkColors // 跟随系统
+  } catch {
+    return false
+  }
+}
+// 渲染进程切换亮/暗时同步更新标题栏按钮区配色
+ipcMain.on('set-titlebar-theme', (_e, light) => {
+  if (process.platform === 'win32' && mainWin?.setTitleBarOverlay) {
+    try {
+      mainWin.setTitleBarOverlay(titlebarColors(light))
+    } catch {
+      /* ignore */
+    }
+  }
+})
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -318,6 +822,12 @@ function createWindow() {
     title: 'NekoPlayer',
     autoHideMenuBar: true,
     acceptFirstMouse: true,
+    // 去掉原生标题栏，内容拉通到顶。Windows：窗口按钮走悬浮层；macOS：保留红绿灯；Linux：保留原生边框以免丢按钮
+    ...(process.platform === 'win32'
+      ? { titleBarStyle: 'hidden', titleBarOverlay: titlebarColors(initialLight()) }
+      : process.platform === 'darwin'
+        ? { titleBarStyle: 'hidden' }
+        : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: false,

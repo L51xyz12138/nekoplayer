@@ -57,6 +57,7 @@ const players: string[] = nn?.playMpv
           :seed="item.id"
           :title="item.title"
           :src="item.posterUrl"
+          :local-path="item.localPath"
           kind="poster"
           :label="item.type === 'series' ? '剧集' : ''"
         />
@@ -93,26 +94,28 @@ const players: string[] = nn?.playMpv
           >
             <ExternalLink :size="16" />
           </IconButton>
-          <IconButton
-            variant="glass"
-            round
-            data-nav-card
-            :active="item.favorite"
-            :title="item.favorite ? '取消收藏' : '收藏'"
-            @click="emit('favorite')"
-          >
-            <Heart :size="18" :fill="item.favorite ? 'currentColor' : 'none'" />
-          </IconButton>
-          <IconButton
-            variant="glass"
-            round
-            data-nav-card
-            :active="item.watched"
-            :title="item.watched ? '取消已看' : '标记已看'"
-            @click="emit('toggle-watched')"
-          >
-            <Check :size="18" />
-          </IconButton>
+          <template v-if="!item.localPath">
+            <IconButton
+              variant="glass"
+              round
+              data-nav-card
+              :active="item.favorite"
+              :title="item.favorite ? '取消收藏' : '收藏'"
+              @click="emit('favorite')"
+            >
+              <Heart :size="18" :fill="item.favorite ? 'currentColor' : 'none'" />
+            </IconButton>
+            <IconButton
+              variant="glass"
+              round
+              data-nav-card
+              :active="item.watched"
+              :title="item.watched ? '取消已看' : '标记已看'"
+              @click="emit('toggle-watched')"
+            >
+              <Check :size="18" />
+            </IconButton>
+          </template>
         </div>
       </div>
     </div>

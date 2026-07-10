@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft } from 'lucide-vue-next'
+import { ArrowLeft, Pencil } from 'lucide-vue-next'
 import DetailHero from '@/components/detail/DetailHero.vue'
+import EditMetaDialog from '@/components/detail/EditMetaDialog.vue'
 import EpisodeList from '@/components/detail/EpisodeList.vue'
 import CastRow from '@/components/detail/CastRow.vue'
 import MediaTechInfo from '@/components/detail/MediaTechInfo.vue'
@@ -15,10 +16,20 @@ import type { Episode, MediaItem } from '@/types/media'
 const props = defineProps<{ id: string }>()
 
 const router = useRouter()
-const { getById, items, toggleFavorite, toggleWatched, loadSeasons } = useLibrary()
+const { getById, items, toggleFavorite, toggleWatched, loadSeasons, saveMetaOverride } = useLibrary()
 const player = usePlayer()
 
 const item = computed(() => getById(props.id))
+
+// 文件源条目才可手动编辑元数据（Emby/Jellyfin 由服务器管理，不在此改）
+const isFileItem = computed(() => {
+  const it = item.value
+  return !!it && (!!it.localPath || it.id.startsWith('local-series:'))
+})
+const editOpen = ref(false)
+function onSaveMeta(data: Partial<MediaItem>) {
+  if (item.value) saveMetaOverride(item.value.id, data)
+}
 
 // 续看集 id：用于剧集列表自动定位/高亮到「正在看的那一集」
 const resumeId = computed(() => (item.value ? player.resumeEpisodeOf(item.value)?.id : undefined))
@@ -36,7 +47,10 @@ const related = computed(() => {
 watch(
   item,
   (it) => {
-    if (it && it.type === 'series' && !it.seasons) loadSeasons(it.id)
+    // 文件源剧集的季集是聚合时就建好的（id 前缀 local-series:），无需也不能走 Emby loadSeasons
+    if (it && it.type === 'series' && !it.seasons && !it.id.startsWith('local-series:')) {
+      loadSeasons(it.id)
+    }
   },
   { immediate: true }
 )
@@ -91,6 +105,9 @@ function playItem(m: MediaItem) {
       <transition name="fade">
         <span v-if="scrolled" class="detail__topbar-title">{{ item.title }}</span>
       </transition>
+      <button v-if="isFileItem" class="detail__edit" title="编辑元数据" @click="editOpen = true">
+        <Pencil :size="16" /> 编辑
+      </button>
     </header>
 
     <div class="detail__scroll" @scroll="onScroll">
@@ -122,6 +139,8 @@ function playItem(m: MediaItem) {
         </MediaRow>
       </div>
     </div>
+
+    <EditMetaDialog :open="editOpen" :item="item || null" @close="editOpen = false" @save="onSaveMeta" />
   </div>
 
   <div v-else class="detail-missing">
@@ -133,7 +152,7 @@ function playItem(m: MediaItem) {
 <style scoped>
 .detail {
   position: relative;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -179,6 +198,28 @@ function playItem(m: MediaItem) {
   font-size: 17px;
   font-weight: 700;
 }
+.detail__edit {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid var(--border);
+  backdrop-filter: var(--blur);
+  transition: background var(--dur) var(--ease);
+}
+.detail__edit:hover {
+  background: rgba(0, 0, 0, 0.62);
+}
+.detail__topbar.is-scrolled .detail__edit {
+  background: var(--surface-2);
+}
 
 .detail__scroll {
   height: 100%;
@@ -194,7 +235,7 @@ function playItem(m: MediaItem) {
   align-items: center;
   justify-content: center;
   gap: 18px;
-  height: 100vh;
+  height: 100%;
   color: var(--text-dim);
 }
 .detail-missing button {

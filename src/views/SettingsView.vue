@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Check, Palette, Film, Captions, Info } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Check, Palette, Film, Captions, Info, Clapperboard } from 'lucide-vue-next'
 import Segmented from '@/components/common/Segmented.vue'
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { useSettings } from '@/composables/useSettings'
+import iconUrl from '@/assets/icon.svg'
 
+const appVersion = __APP_VERSION__
 const { settings, themes } = useSettings()
 const subColors = ['#ffffff', '#ffce53', '#7fe7ff', '#a0ff9d']
 
@@ -26,6 +28,36 @@ const currentPlayerPath = computed({
     settings.playerPaths[settings.playerMode.toLowerCase()] = v
   }
 })
+
+// 刮削语言：UI 用中文/English，存 zh-CN/en-US
+const tmdbLangLabel = computed({
+  get: () => (settings.tmdbLang === 'en-US' ? 'English' : '中文'),
+  set: (v: string | number) => {
+    settings.tmdbLang = v === 'English' ? 'en-US' : 'zh-CN'
+  }
+})
+
+const pathPlaceholder = computed(() => {
+  const win = platform === 'win32'
+  if (settings.playerMode === 'mpv') return win ? 'D:\\mpv\\mpv.exe' : '/opt/homebrew/bin/mpv'
+  return win ? '如 D:\\PotPlayer\\PotPlayerMini64.exe' : '如 /Applications/VLC.app'
+})
+
+// mpv 可用性提示（缩略图/本地播放都依赖 mpv；dev 与打包版是不同配置档，路径需各填一次）
+const mpvStatus = ref<{ ok: boolean; path: string } | null>(null)
+async function refreshMpvStatus() {
+  if (settings.playerMode !== 'mpv' || !window.nekoNative?.checkMpv) {
+    mpvStatus.value = null
+    return
+  }
+  try {
+    mpvStatus.value = await window.nekoNative.checkMpv(settings.playerPaths.mpv || '')
+  } catch {
+    mpvStatus.value = null
+  }
+}
+onMounted(refreshMpvStatus)
+watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
 </script>
 
 <template>
@@ -79,12 +111,25 @@ const currentPlayerPath = computed({
               <h4>{{ settings.playerMode }} 路径</h4>
               <p>自定义所选播放器的程序路径；留空或无效则用系统默认</p>
             </div>
-            <input
-              v-model="currentPlayerPath"
-              class="path-input"
-              :placeholder="settings.playerMode === 'mpv' ? '/opt/homebrew/bin/mpv' : '如 /Applications/VLC.app'"
-              spellcheck="false"
-            />
+            <div class="path-cell">
+              <input
+                v-model="currentPlayerPath"
+                class="path-input"
+                :placeholder="pathPlaceholder"
+                spellcheck="false"
+              />
+              <p
+                v-if="settings.playerMode === 'mpv' && mpvStatus"
+                class="path-status"
+                :class="{ ok: mpvStatus.ok }"
+              >
+                {{
+                  mpvStatus.ok
+                    ? '✓ 已找到 mpv，缩略图与本地播放可用'
+                    : '⚠ 未找到 mpv：缩略图和本地/网络视频播放都需要它，请在上方填完整路径'
+                }}
+              </p>
+            </div>
           </div>
           <div class="row">
             <div class="row__label"><h4>默认画质</h4><p>网络良好时优先使用的清晰度</p></div>
@@ -95,8 +140,16 @@ const currentPlayerPath = computed({
             <Segmented v-model="settings.rate" :options="[0.75, 1, 1.25, 1.5, 2]" />
           </div>
           <div class="row">
+            <div class="row__label"><h4>音轨语言</h4><p>播放时优先选择的音轨（原声即不强制切换）· 仅 mpv</p></div>
+            <Segmented v-model="settings.audioLang" :options="['原声', '中文', '日文', '英文']" />
+          </div>
+          <div class="row">
             <div class="row__label"><h4>自动播放下一集</h4><p>剧集播放结束后自动续播</p></div>
             <ToggleSwitch v-model="settings.autoNext" />
+          </div>
+          <div class="row">
+            <div class="row__label"><h4>跳过片头片尾</h4><p>按章节名自动跳过（需媒体带 Intro/OP/ED 等章节）· 仅 mpv</p></div>
+            <ToggleSwitch v-model="settings.skipIntro" />
           </div>
           <div class="row">
             <div class="row__label"><h4>硬件解码</h4><p>使用 GPU 加速解码，更省电流畅</p></div>
@@ -109,6 +162,10 @@ const currentPlayerPath = computed({
       <section class="group">
         <h2 class="group__title"><Captions :size="17" /> 字幕</h2>
         <div class="card">
+          <div class="row">
+            <div class="row__label"><h4>字幕语言</h4><p>播放时优先的字幕（关闭=不显示字幕）· 仅 mpv</p></div>
+            <Segmented v-model="settings.subLang" :options="['自动', '中文', '英文', '关闭']" />
+          </div>
           <div class="row">
             <div class="row__label"><h4>字幕字号</h4><p>调整字幕文字的大小</p></div>
             <Segmented v-model="settings.subSize" :options="['小', '中', '大']" />
@@ -133,14 +190,37 @@ const currentPlayerPath = computed({
         </div>
       </section>
 
+      <!-- 刮削 -->
+      <section class="group">
+        <h2 class="group__title"><Clapperboard :size="17" /> 刮削（文件源元数据）</h2>
+        <div class="card">
+          <div class="row">
+            <div class="row__label">
+              <h4>TMDB API Key</h4>
+              <p>填入后，本机 / WebDAV / SMB / DLNA 的视频自动匹配海报与信息；留空则只显示 mpv 缩略图。Emby / Jellyfin 由服务器自己刮，不受此影响。免费申请：themoviedb.org → 设置 → API</p>
+            </div>
+            <input
+              v-model="settings.tmdbKey"
+              class="path-input"
+              placeholder="TMDB v3 API Key"
+              spellcheck="false"
+            />
+          </div>
+          <div class="row">
+            <div class="row__label"><h4>刮削语言</h4><p>匹配到的标题 / 简介语言</p></div>
+            <Segmented v-model="tmdbLangLabel" :options="['中文', 'English']" />
+          </div>
+        </div>
+      </section>
+
       <!-- 关于 -->
       <section class="group">
         <h2 class="group__title"><Info :size="17" /> 关于</h2>
         <div class="card about">
-          <div class="about__logo">ネ</div>
+          <img class="about__logo" :src="iconUrl" alt="NekoPlayer" />
           <div class="about__info">
-            <h3>NekoPlayer <span>v0.1.0 · 开发中</span></h3>
-            <p>跨平台媒体播放器 · 已接入真实 Emby</p>
+            <h3>NekoPlayer <span>v{{ appVersion }}</span></h3>
+            <p>跨平台媒体播放器 · 支持 Emby / Jellyfin / 本机 / WebDAV / SMB / DLNA</p>
             <p class="about__stack">Vue 3 · Vite · TypeScript · 由浮浮酱精心打造 ฅ'ω'ฅ</p>
           </div>
         </div>
@@ -153,7 +233,7 @@ const currentPlayerPath = computed({
 .settings {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
 }
 .settings__head {
   flex-shrink: 0;
@@ -269,17 +349,11 @@ const currentPlayerPath = computed({
   padding: 24px 20px;
 }
 .about__logo {
-  display: grid;
-  place-items: center;
   width: 62px;
   height: 62px;
   flex-shrink: 0;
-  border-radius: 18px;
-  font-size: 30px;
-  font-weight: 800;
-  color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 8px 22px var(--accent-glow);
+  border-radius: 15px;
+  box-shadow: 0 8px 22px rgba(111, 157, 255, 0.35);
 }
 .about__info h3 {
   font-size: 18px;
@@ -300,6 +374,22 @@ const currentPlayerPath = computed({
   color: var(--text-mute) !important;
 }
 
+.path-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.path-status {
+  max-width: 280px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+  color: #ffb454;
+}
+.path-status.ok {
+  color: #46d17f;
+}
 .path-input {
   width: 280px;
   height: 40px;

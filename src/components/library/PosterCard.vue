@@ -11,10 +11,14 @@ const emit = defineEmits<{ favorite: [id: string]; play: [item: MediaItem] }>()
 const router = useRouter()
 
 function open() {
-  const path = props.item.type === 'collection' ? 'collection' : 'detail'
-  router.push(`/${path}/${props.item.id}`)
+  if (props.item.type === 'collection') {
+    router.push({ name: 'collection', params: { id: props.item.id } })
+    return
+  }
+  // 文件源条目 id 含斜杠/冒号，用具名路由让 vue-router 正确编码
+  router.push({ name: 'detail', params: { id: props.item.id } })
 }
-// 空格键：合集打开、其它直接播放
+// 空格键：合集打开详情，其余（含文件源）直接播放
 function onSpace() {
   if (props.item.type === 'collection') open()
   else emit('play', props.item)
@@ -35,6 +39,7 @@ function onSpace() {
         :seed="item.id"
         :title="item.title"
         :src="item.posterUrl"
+        :local-path="item.localPath"
         kind="poster"
         :label="item.type === 'series' ? '剧集' : item.type === 'collection' ? '合集' : ''"
       />
@@ -66,8 +71,13 @@ function onSpace() {
     <div class="card__meta">
       <h3 class="card__title">{{ item.title }}</h3>
       <div class="card__sub">
-        <span>{{ item.year }}</span>
-        <RatingPill :rating="item.rating" />
+        <template v-if="item.localPath && !item.scraped">
+          <span>本地视频</span>
+        </template>
+        <template v-else>
+          <span>{{ item.year || '—' }}</span>
+          <RatingPill v-if="item.rating > 0" :rating="item.rating" />
+        </template>
       </div>
     </div>
   </article>

@@ -1,4 +1,4 @@
-import { computed, reactive, toRefs } from 'vue'
+import { computed, reactive, ref, toRefs, watch } from 'vue'
 import {
   getCollections,
   getEpisodes,
@@ -13,9 +13,13 @@ import {
   type EmbySession
 } from '@/api/emby'
 import { mapEmbyItem, mapEpisodes, mapNextUp, progressOf } from '@/api/mapper'
+import { parseEpisode, scrapeMedia, type ScrapeResult, type TmdbConfig } from '@/api/tmdb'
 import { useSources } from './useSources'
+import { useSettings } from './useSettings'
 import { pget, pset } from './persist'
 import type { LibraryCategory, MediaItem, SortMode } from '@/types/media'
+import type { MediaSource } from '@/types/source'
+import type { NekoVideoFile } from '@/types/native'
 
 // 上次成功加载的媒体库缓存：启动先渲染它，再后台刷新（stale-while-revalidate）
 const CACHE_KEY = 'neko-library-cache'
@@ -73,6 +77,15 @@ const state = reactive<LibraryState>({
   error: '',
   loaded: false
 })
+
+/** 文件源扫描状态（供「媒体源」页显示：扫描中/找到几个/失败原因），键=源 id */
+const fileScan = reactive<Record<string, { scanning: boolean; count: number; error?: string }>>({})
+
+/** 文件源视图模式：文件夹层级 / 媒体库网格（用户可切换） */
+const fileViewMode = ref<'folder' | 'library'>('folder')
+function setFileViewMode(m: 'folder' | 'library') {
+  fileViewMode.value = m
+}
 
 // 先按来源缩小，再按媒体库缩小；其余派生数据都基于最终 scoped
 const bySource = computed(() =>
@@ -310,12 +323,463 @@ function applyContinueWatching(
   })
 }
 
-/** 从真实 Emby 拉取媒体库 */
+/** 本机存储视频 → MediaItem（无元数据，封面走 mpv 抽帧，点卡片直接播文件） */
+// ---- 文件源刮削（TMDB）：结果按「文件名派生标题」缓存，命中即复用，未命中不重试 ----
+const SCRAPE_KEY = 'neko-scrape-cache'
+// 刮削结果格式版本：加了演员/类型等字段就 +1，旧缓存作废重刮（否则老条目一直没演员/相关推荐）
+const SCRAPE_VER = '2'
+function loadScrapeCache(): Record<string, ScrapeResult | null> {
+  try {
+    if (pget('neko-scrape-ver') !== SCRAPE_VER) return {} // 版本变了 → 清空重刮
+    const raw = pget(SCRAPE_KEY)
+    const c = raw ? (JSON.parse(raw) as Record<string, ScrapeResult | null>) : {}
+    // 清掉历史上「纯数字 key」的垃圾结果（如 "25"→某电影）——新逻辑不再刮纯数字标题
+    for (const k of Object.keys(c)) if (!/\p{L}/u.test(k)) delete c[k]
+    return c
+  } catch {
+    return {}
+  }
+}
+const scrapeCache: Record<string, ScrapeResult | null> = loadScrapeCache()
+let scrapeTimer: ReturnType<typeof setTimeout> | undefined
+function saveScrapeCache() {
+  if (scrapeTimer) clearTimeout(scrapeTimer)
+  scrapeTimer = setTimeout(() => {
+    scrapeTimer = undefined
+    pset(SCRAPE_KEY, JSON.stringify(scrapeCache))
+    pset('neko-scrape-ver', SCRAPE_VER)
+  }, 800)
+}
+
+/** 把刮削结果套到条目上（有海报/年份/评分 → 卡片展示媒体信息而非缩略图） */
+function applyScrape(item: MediaItem, r: ScrapeResult) {
+  item.title = r.title || item.title
+  if (r.year) item.year = r.year
+  if (r.rating) item.rating = r.rating
+  if (r.overview) item.overview = r.overview
+  if (r.posterUrl) item.posterUrl = r.posterUrl
+  if (r.backdropUrl) item.backdropUrl = r.backdropUrl
+  if (r.tagline) item.tagline = r.tagline
+  if (r.genres?.length) item.genres = r.genres
+  if (r.cast?.length) item.cast = r.cast
+  item.scraped = true
+}
+
+// ---- 手动元数据覆盖（编辑元数据）：按条目 id 存，永远盖过自动刮削 ----
+const OVERRIDE_KEY = 'neko-scrape-override'
+function loadOverrides(): Record<string, Partial<MediaItem>> {
+  try {
+    const raw = pget(OVERRIDE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, Partial<MediaItem>>) : {}
+  } catch {
+    return {}
+  }
+}
+const overrides: Record<string, Partial<MediaItem>> = loadOverrides()
+
+/** 把手动覆盖套到条目上（在自动刮削之后调用，覆盖优先；标 scraped 防被自动刮盖回） */
+function applyOverride(item: MediaItem) {
+  const o = overrides[item.id]
+  if (!o) return
+  Object.assign(item, o)
+  item.scraped = true
+}
+
+/** 保存手动元数据覆盖并即时套用到当前条目 */
+function saveMetaOverride(id: string, data: Partial<MediaItem>) {
+  overrides[id] = { ...(overrides[id] ?? {}), ...data }
+  pset(OVERRIDE_KEY, JSON.stringify(overrides))
+  const item = getById(id)
+  if (item) applyOverride(item)
+  saveCache(state.items)
+}
+
+/** 用指定名字重新匹配 TMDB（movie/剧集），供编辑弹窗「重新匹配」预览 */
+async function scrapeByName(query: string, isTv: boolean): Promise<ScrapeResult | null> {
+  const s = useSettings().settings
+  if (!s.tmdbKey || !query.trim()) return null
+  return scrapeMedia(
+    {
+      key: s.tmdbKey,
+      lang: s.tmdbLang || 'zh-CN',
+      apiBase: s.tmdbApiBase || 'https://api.themoviedb.org/3',
+      imgBase: s.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
+    },
+    query,
+    isTv
+  )
+}
+
+/** 后台刮削文件源条目（仅未命中缓存的走网络），更新条目并写缓存 */
+async function scrapeFileItems() {
+  const { settings } = useSettings()
+  if (!settings.tmdbKey) return
+  const cfg: TmdbConfig = {
+    key: settings.tmdbKey,
+    lang: settings.tmdbLang || 'zh-CN',
+    apiBase: settings.tmdbApiBase || 'https://api.themoviedb.org/3',
+    imgBase: settings.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
+  }
+  // 直接取 state.items（响应式代理）里的文件条目来改，改动才能触发卡片更新。
+  // 电影文件（localPath）+ 聚合出的剧集（local-series:，按剧名强制剧集搜）
+  const targets = state.items.filter(
+    (m) => (m.localPath || m.id.startsWith('local-series:')) && !m.scraped
+  )
+  if (!targets.length) return
+  let changed = false
+  let idx = 0
+  const worker = async () => {
+    while (idx < targets.length) {
+      const item = targets[idx++]
+      const key = item.title // 电影=文件名派生标题、剧集=剧名（刮削前）
+      const forceTv = item.id.startsWith('local-series:')
+      let r: ScrapeResult | null
+      if (key in scrapeCache) r = scrapeCache[key]
+      else {
+        r = await scrapeMedia(cfg, key, forceTv)
+        scrapeCache[key] = r
+      }
+      if (r) {
+        applyScrape(item, r)
+        changed = true
+      }
+    }
+  }
+  // 限 4 并发，避免打爆 TMDB
+  await Promise.all(Array.from({ length: 4 }, worker))
+  if (changed) {
+    saveScrapeCache()
+    saveCache(state.items)
+  }
+}
+
+// 用户填入/更换 TMDB Key 后，立即对已在库的文件源条目补刮（无需重启）
+watch(
+  () => useSettings().settings.tmdbKey,
+  (k) => {
+    if (k) void scrapeFileItems()
+  }
+)
+
+function mapLocalVideo(v: NekoVideoFile, source: MediaSource): MediaItem {
+  const ep = parseEpisode(v.name)
+  const item: MediaItem = {
+    id: 'local:' + v.path,
+    sourceId: source.id,
+    title: v.name.replace(/\.[^.]+$/, ''),
+    type: 'movie',
+    year: 0,
+    runtime: 0,
+    rating: 0,
+    certification: '',
+    genres: [],
+    overview: '',
+    cast: [],
+    addedAt: v.mtime || Date.now(),
+    localPath: v.path,
+    folder: v.dir ?? '',
+    // 文件源视频无服务器分类，统一归到「其他」库（所有文件源共用一个，避免多个同名 tab）
+    libraryId: 'file:other',
+    libraryName: '其他',
+    episodeInfo: ep ?? undefined
+  }
+  // 电影文件：同步套已缓存的刮削结果（防闪）；剧集分集在聚合成剧集后按剧名刮。
+  // 纯数字标题（DLNA 的 "25"/"1637"）不套缓存——那类刮出来多是垃圾，且会干扰文件夹聚合
+  if (!ep && /\p{L}/u.test(item.title)) {
+    const cached = scrapeCache[item.title]
+    if (cached) applyScrape(item, cached)
+  }
+  return item
+}
+
+const isFileItem = (m: MediaItem) => m.id.startsWith('local:') || m.id.startsWith('local-series:')
+
+/** 分集文件夹的公共前缀，作为剧集在文件夹视图里的所在文件夹 */
+function commonFolder(folders: string[]): string {
+  const rows = folders.map((f) => (f ? f.split('/').filter(Boolean) : []))
+  if (!rows.length) return ''
+  let n = rows[0].length
+  for (const r of rows) {
+    let i = 0
+    while (i < n && i < r.length && r[i] === rows[0][i]) i++
+    n = i
+  }
+  return rows[0].slice(0, n).join('/')
+}
+
+// 「Season 1 / 第2季 / S03」这类季文件夹段
+const SEASON_SEG = /^(?:season\s*\d+|第\s*\d+\s*季|s\d{1,2})$/i
+/** 剧集所在的「剧文件夹」：末段是季文件夹时取其父，否则取本身 */
+function showFolder(folder: string): string {
+  const parts = folder.split('/').filter(Boolean)
+  if (parts.length >= 2 && SEASON_SEG.test(parts[parts.length - 1])) return parts.slice(0, -1).join('/')
+  return parts.join('/')
+}
+/** 从文件夹末段推季号（无则第 1 季） */
+function seasonFromFolder(folder: string): number {
+  const last = folder.split('/').filter(Boolean).pop() ?? ''
+  const m = last.match(/(?:season\s*|第\s*|s)(\d{1,2})/i)
+  return m ? +m[1] : 1
+}
+/** 把文件夹名清成可搜的剧名：去「09.」序号、年份、画质标签 */
+function folderShowName(seg: string): string {
+  return (
+    seg
+      .replace(/^\d+[.\s_-]+/, '')
+      .replace(/[（(]\s*(?:19|20)\d{2}\s*[)）]/g, '')
+      .replace(/\b(?:19|20)\d{2}\b/g, '')
+      .replace(/\b(?:4k|2160p|1080p|720p|blu-?ray|web-?dl|remux|hevc|x26[45]|hdr|dovi|uhd|repack)\b/gi, '')
+      .replace(/[._]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || seg
+  )
+}
+
+/** 剧集条目外壳：从 scrapeCache[showKey] 取已刮信息填充（未刮则占位，稍后 scrapeFileItems 补） */
+function seriesShell(id: string, sourceId: string, showKey: string, addedAt: number): MediaItem {
+  const info = scrapeCache[showKey]
+  return {
+    id,
+    sourceId,
+    title: info?.title || showKey,
+    type: 'series',
+    year: info?.year || 0,
+    runtime: 0,
+    rating: info?.rating || 0,
+    certification: '',
+    genres: info?.genres || [],
+    overview: info?.overview || '',
+    tagline: info?.tagline,
+    cast: info?.cast || [],
+    addedAt,
+    posterUrl: info?.posterUrl,
+    backdropUrl: info?.backdropUrl,
+    libraryId: 'file:other',
+    libraryName: '其他',
+    seasons: [],
+    scraped: !!info
+  }
+}
+
+/** 把文件源分集聚合成剧集条目；电影原样返回。两级：①文件名带集号(episodeInfo) ②同源同名的散条目(≥3) */
+function aggregateFileItems(items: MediaItem[]): MediaItem[] {
+  const out: MediaItem[] = []
+  const seriesMap = new Map<string, MediaItem>()
+  const foldersOf = new Map<string, string[]>()
+  const loose: MediaItem[] = []
+  for (const m of items) {
+    const ep = m.episodeInfo
+    if (!ep) {
+      loose.push(m)
+      continue
+    }
+    const key = m.sourceId + '::' + ep.show
+    let series = seriesMap.get(key)
+    if (!series) {
+      series = seriesShell('local-series:' + key, m.sourceId, ep.show, m.addedAt)
+      seriesMap.set(key, series)
+      foldersOf.set(key, [])
+      out.push(series)
+    }
+    if (m.addedAt > series.addedAt) series.addedAt = m.addedAt
+    foldersOf.get(key)!.push(m.folder ?? '')
+    let season = series.seasons!.find((s) => s.season === ep.season)
+    if (!season) {
+      season = { season: ep.season, title: `第 ${ep.season} 季`, episodes: [] }
+      series.seasons!.push(season)
+    }
+    season.episodes.push({
+      id: m.id,
+      season: ep.season,
+      episode: ep.episode,
+      title: ep.epTitle || `S${ep.season}E${ep.episode}`,
+      runtime: 0,
+      overview: '',
+      stillSeed: m.id,
+      localPath: m.localPath,
+      folder: m.folder
+    })
+  }
+  for (const [key, series] of seriesMap) {
+    series.folder = commonFolder(foldersOf.get(key)!)
+    series.seasons!.sort((a, b) => a.season - b.season)
+    for (const s of series.seasons!) s.episodes.sort((a, b) => a.episode - b.episode)
+  }
+  // 兜底：媒体服务器多按「剧名/Season N/分集」组织，文件夹比文件名可靠。
+  // 同源、同一「剧文件夹」下 ≥3 个散条目 → 剧集；若它们各自都刮成了不同电影，则是电影合集文件夹（保持电影）
+  const byShowFolder = new Map<string, MediaItem[]>()
+  for (const m of loose) {
+    const k = m.sourceId + '::' + showFolder(m.folder ?? '')
+    const g = byShowFolder.get(k) ?? (byShowFolder.set(k, []), byShowFolder.get(k)!)
+    g.push(m)
+  }
+  for (const g of byShowFolder.values()) {
+    // 电影合集文件夹（如三部曲）：都各自刮成了不同电影 → 保持电影。但 ≥5 个基本是剧集，直接聚合
+    const isCollection =
+      g.length < 5 && g.every((m) => m.scraped) && new Set(g.map((m) => m.title)).size === g.length
+    if (g.length < 3 || isCollection) {
+      out.push(...g)
+      continue
+    }
+    const folder = showFolder(g[0].folder ?? '')
+    const showKey = folderShowName(folder.split('/').filter(Boolean).pop() ?? g[0].title)
+    const series = seriesShell(
+      'local-series:' + g[0].sourceId + '::' + showKey,
+      g[0].sourceId,
+      showKey,
+      g.reduce((a, m) => Math.max(a, m.addedAt), 0)
+    )
+    series.folder = commonFolder(g.map((m) => m.folder ?? ''))
+    // 按（从文件夹推的）季分组，季内按文件名自然序当集号
+    const bySeason = new Map<number, MediaItem[]>()
+    for (const m of g) {
+      const sn = seasonFromFolder(m.folder ?? '')
+      const arr = bySeason.get(sn) ?? (bySeason.set(sn, []), bySeason.get(sn)!)
+      arr.push(m)
+    }
+    series.seasons = [...bySeason.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([sn, arr]) => ({
+        season: sn,
+        title: `第 ${sn} 季`,
+        episodes: arr
+          .sort((a, b) => (a.localPath ?? '').localeCompare(b.localPath ?? '', undefined, { numeric: true }))
+          .map((m, i) => ({
+            id: m.id,
+            season: sn,
+            episode: i + 1,
+            title: `第 ${i + 1} 集`,
+            runtime: 0,
+            overview: '',
+            stillSeed: m.id,
+            localPath: m.localPath,
+            folder: m.folder
+          }))
+      }))
+    out.push(series)
+  }
+  return out
+}
+
+const FILE_KINDS = ['local', 'webdav', 'smb', 'dlna']
+
+/** 扫描所有启用的文件浏览类源（本机/WebDAV/SMB），把视频映射为 MediaItem */
+/** 网络文件源可能慢或离线，给扫描加超时兜底，避免卡住整库加载 */
+const SCAN_TIMEOUT = 25000
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(fallback), ms)
+    p.then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(t)
+        resolve(fallback)
+      }
+    )
+  })
+}
+
+// 花絮/预告/特典/菜单/SP 等附加内容（非正片）：按名排除，避免乱刮成电影
+const EXTRA_RE =
+  /花絮|预告|彩蛋|特典|片花|幕后|访谈|删减|菜单|sample|trailer|teaser|preview|featurette|deleted|\bextras?\b|behind|\[(?:menu|sp|nc(?:op|ed)|pv|cm|op|ed)\s*\d*\]|\bmenu\s*\d|\bSPs\b/i
+
+/** 扫描结果清洗：去花絮/预告/SP + 蓝光/DVD 原盘（BDMV/VIDEO_TS，含 DLNA 放在文件夹里的）同一碟只留最大正片 */
+function cleanScanned(videos: NekoVideoFile[]): NekoVideoFile[] {
+  const kept = videos.filter((v) => !EXTRA_RE.test(v.name) && !EXTRA_RE.test(v.dir ?? ''))
+  const discs = new Map<string, NekoVideoFile[]>()
+  const out: NekoVideoFile[] = []
+  for (const v of kept) {
+    // BDMV/VIDEO_TS 可能在路径里（本机/SMB）或文件夹里（DLNA 的 path 是 URL、结构在 dir）
+    const dir = (v.dir ?? '').replace(/\\/g, '/')
+    const p = v.path.replace(/\\/g, '/')
+    const md = dir.match(/^(.*?)\/?(?:BDMV|VIDEO_TS)(?:\/|$)/i)
+    const mp = p.match(/^(.*?)\/(?:BDMV|VIDEO_TS)\//i)
+    const disc = md ? 'd:' + md[1] : mp ? 'p:' + mp[1] : null
+    if (disc) {
+      const g = discs.get(disc) ?? (discs.set(disc, []), discs.get(disc)!)
+      g.push(v)
+    } else {
+      out.push(v)
+    }
+  }
+  // 每张原盘只留体积最大的（正片），丢弃 00001.m2ts 之类碎片
+  for (const g of discs.values()) out.push(g.reduce((a, b) => ((b.size || 0) > (a.size || 0) ? b : a)))
+  return out
+}
+
+async function loadFileSourceItems(): Promise<MediaItem[]> {
+  const nn = window.nekoNative
+  if (!nn) return []
+  const fileSources = useSources().sources.value.filter(
+    (s) => FILE_KINDS.includes(s.kind) && s.enabled
+  )
+  if (!fileSources.length) return []
+  const groups = await Promise.all(
+    fileSources.map(async (src) => {
+      fileScan[src.id] = { scanning: true, count: fileScan[src.id]?.count ?? 0 }
+      try {
+        let scan: Promise<{ videos?: NekoVideoFile[]; error?: string }> | null = null
+        // config 是 Vue 响应式 Proxy，直接过 IPC 会报 "An object could not be cloned"，
+        // 必须展开成普通对象再传（local 传的是字符串路径，故本来就没事）
+        const cfg = { ...src.config }
+        if (src.kind === 'local') {
+          if (src.config?.path && nn.scanVideos) scan = nn.scanVideos(src.config.path)
+        } else if (src.kind === 'webdav') {
+          if (nn.scanWebdav) scan = nn.scanWebdav(cfg)
+        } else if (src.kind === 'smb') {
+          if (nn.scanSmb) scan = nn.scanSmb(cfg)
+        } else if (src.kind === 'dlna') {
+          if (nn.scanDlna) scan = nn.scanDlna(cfg)
+        }
+        const r: { videos?: NekoVideoFile[]; error?: string } = scan
+          ? await withTimeout(scan, SCAN_TIMEOUT, { error: '扫描超时（源无响应）' })
+          : { error: '缺少必要的连接信息' }
+        const items = cleanScanned(r.videos ?? []).map((v) => mapLocalVideo(v, src))
+        if (r.error) console.warn('[NekoPlayer] 文件源扫描失败：', src.name, r.error)
+        fileScan[src.id] = { scanning: false, count: items.length, error: r.error }
+        return items
+      } catch (e) {
+        fileScan[src.id] = {
+          scanning: false,
+          count: 0,
+          error: e instanceof Error ? e.message : '扫描出错'
+        }
+        return [] as MediaItem[]
+      }
+    })
+  )
+  return groups.flat()
+}
+
+/** 后台加载文件源视频并并入库：用最新的 Emby 条目 + 新文件条目，替换掉旧文件条目 */
+async function appendFileSourceItems() {
+  try {
+    const fileItems = await loadFileSourceItems()
+    const embyItems = state.items.filter((m) => !isFileItem(m))
+    // 把剧集分集聚合成剧集条目，套上手动覆盖（覆盖优先），再并入库
+    const aggregated = aggregateFileItems(fileItems)
+    for (const m of aggregated) applyOverride(m)
+    state.items = [...embyItems, ...aggregated]
+    saveCache(state.items)
+    // 后台刮削（未命中缓存的走 TMDB），命中后更新卡片为海报/信息
+    void scrapeFileItems()
+  } catch {
+    /* 文件源失败不影响主库 */
+  }
+}
+
+/** 加载媒体库：Emby/Jellyfin 聚合 + 本机存储视频，合并为一个库 */
 async function loadFromEmby() {
   const embySources = useSources().sources.value.filter(
     (s) => (s.kind === 'emby' || s.kind === 'jellyfin') && s.enabled && s.session
   )
-  if (!embySources.length) {
+  const hasFileSource = useSources().sources.value.some(
+    (s) => FILE_KINDS.includes(s.kind) && s.enabled
+  )
+  if (!embySources.length && !hasFileSource) {
     state.items = []
     state.loaded = false
     saveCache([])
@@ -385,9 +849,13 @@ async function loadFromEmby() {
       const sea = prevSeasons.get(m.id)
       if (sea) m.seasons = sea
     }
-    state.items = next
+    // 先让 Emby 内容立即渲染，文件源（可能是慢/离线的网络盘）后台补进来，
+    // 避免一个掉线的网络源把整库卡在加载态；旧文件条目先占位（SWR）防闪烁
+    const prevFileItems = hasFileSource ? state.items.filter((m) => isFileItem(m)) : []
+    state.items = [...next, ...prevFileItems]
     state.loaded = true
     saveCache(state.items)
+    if (hasFileSource) void appendFileSourceItems()
   } catch (e) {
     state.error = e instanceof Error ? e.message : '媒体库加载失败'
   } finally {
@@ -457,6 +925,10 @@ async function loadSeasons(seriesId: string) {
 export function useLibrary() {
   return {
     ...toRefs(state),
+    fileScan,
+    fileViewMode,
+    setFileViewMode,
+    bySource,
     scoped,
     libraries,
     counts,
@@ -486,6 +958,8 @@ export function useLibrary() {
     clearLibrary,
     loadFromEmby,
     refreshAfterPlayback,
-    loadSeasons
+    loadSeasons,
+    saveMetaOverride,
+    scrapeByName
   }
 }

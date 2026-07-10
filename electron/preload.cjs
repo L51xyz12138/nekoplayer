@@ -15,5 +15,16 @@ contextBridge.exposeInMainWorld('nekoNative', {
   // 持久化存储（写到 userData 下的 json 文件，跨软件更新不丢；读同步、写异步）
   storeGet: (key) => ipcRenderer.sendSync('store-get', key),
   storeSet: (key, val) => ipcRenderer.send('store-set', { key, val }),
-  storeRemove: (key) => ipcRenderer.send('store-remove', key)
+  storeRemove: (key) => ipcRenderer.send('store-remove', key),
+  // 文件浏览类源：本机(选文件夹+扫视频) / WebDAV / SMB + 视频缩略图
+  pickFolder: () => ipcRenderer.invoke('pick-folder'),
+  scanVideos: (root) => ipcRenderer.invoke('scan-videos', root),
+  scanWebdav: (config) => ipcRenderer.invoke('scan-webdav', config),
+  scanSmb: (config) => ipcRenderer.invoke('scan-smb', config),
+  discoverDlna: () => ipcRenderer.invoke('discover-dlna'),
+  scanDlna: (config) => ipcRenderer.invoke('scan-dlna', config),
+  getThumb: (file, mpvPath) => ipcRenderer.invoke('get-thumb', { file, mpvPath }),
+  checkMpv: (mpvPath) => ipcRenderer.invoke('check-mpv', mpvPath),
+  // 亮/暗切换时同步标题栏悬浮按钮区配色（Windows）
+  setTitlebarTheme: (light) => ipcRenderer.send('set-titlebar-theme', light)
 })

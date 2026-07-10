@@ -25,9 +25,23 @@ interface Settings {
   rate: string | number
   autoNext: boolean
   hwdecode: boolean
+  /** 音轨语言偏好（传给 mpv --alang）：原声/中文/日文/英文 */
+  audioLang: string
+  /** 字幕语言偏好（传给 mpv --slang / --sid）：自动/关闭/中文/英文 */
+  subLang: string
+  /** 自动跳过片头片尾（mpv 按章节名跳，需媒体有对应章节） */
+  skipIntro: boolean
   subSize: string | number
   subColor: string
   subOutline: boolean
+  /** TMDB API Key（v3）；填了才启用文件源刮削（Emby/Jellyfin 由服务器刮，不受此影响） */
+  tmdbKey: string
+  /** 刮削语言，如 zh-CN / en-US */
+  tmdbLang: string
+  /** TMDB API 基地址（国内不通时可改镜像） */
+  tmdbApiBase: string
+  /** TMDB 图片基地址（含尺寸段，如 .../w500） */
+  tmdbImgBase: string
 }
 
 const DEFAULTS: Settings = {
@@ -39,9 +53,16 @@ const DEFAULTS: Settings = {
   rate: 1,
   autoNext: true,
   hwdecode: true,
+  audioLang: '原声',
+  subLang: '自动',
+  skipIntro: false,
   subSize: '中',
   subColor: '#ffffff',
-  subOutline: true
+  subOutline: true,
+  tmdbKey: '',
+  tmdbLang: 'zh-CN',
+  tmdbApiBase: 'https://api.themoviedb.org/3',
+  tmdbImgBase: 'https://image.tmdb.org/t/p/w500'
 }
 
 const KEY = 'neko-settings'
@@ -73,6 +94,8 @@ const prefersLight = window.matchMedia('(prefers-color-scheme: light)')
 export function applyScheme(mode: string) {
   const light = mode === '亮色' || (mode === '跟随系统' && prefersLight.matches)
   document.documentElement.dataset.scheme = light ? 'light' : 'dark'
+  // 同步标题栏悬浮窗口按钮区配色（否则亮色下右上角一块黑）
+  window.nekoNative?.setTitlebarTheme?.(light)
 }
 
 // 启动即应用已保存的主题与背景

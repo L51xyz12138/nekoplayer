@@ -37,6 +37,11 @@ async function playSeriesResume(item: MediaItem, player: string) {
 /** 播放入口：Electron 下交给外部播放器（按设置的默认播放器）；剧集未指定集则播续看集 */
 function play(item: MediaItem, episode?: Episode) {
   if (!window.nekoNative?.playMpv) return // 非 Electron：无内置播放器
+  // 本机存储视频：直接播文件，无服务器进度同步
+  if (item.localPath) {
+    playFile(item.localPath, item.title)
+    return
+  }
   const player = useSettings().settings.playerMode
   if (item.type === 'series' && !episode) void playSeriesResume(item, player)
   else playWith(item, episode, player)
@@ -45,8 +50,19 @@ function play(item: MediaItem, episode?: Episode) {
 /** 用指定播放器播放（mpv/IINA/VLC/PotPlayer）；剧集带整季播放列表 */
 function playWith(item: MediaItem, episode: Episode | undefined, player: string) {
   const native = window.nekoNative
+  if (!native?.playMpv) return
+  // 文件源剧集分集：播分集文件
+  if (episode?.localPath) {
+    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player)
+    return
+  }
+  // 文件源电影：直接用指定播放器播文件（无服务器进度同步）
+  if (item.localPath) {
+    playFile(item.localPath, item.title, player)
+    return
+  }
   const s = useSources().sessionOf(item.sourceId)
-  if (!native?.playMpv || !s) return
+  if (!s) return
   const { settings } = useSettings()
   const targetId = episode?.id ?? item.id
   const label = episode ? `${item.title} · S${episode.season}E${episode.episode}` : item.title
@@ -97,6 +113,20 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
     .catch((e) => console.error('[NekoPlayer] 取流失败：', e))
 }
 
+/** 播放本机/文件浏览类源的文件（外部播放器，无进度同步）；player 省略则用默认播放器 */
+function playFile(filePath: string, title: string, player?: string) {
+  const native = window.nekoNative
+  if (!native?.playMpv) return
+  const { settings } = useSettings()
+  player = player || settings.playerMode
+  if (player === 'mpv') {
+    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0)
+  } else if (native.playExternal) {
+    const key = player.toLowerCase()
+    native.playExternal(key, filePath, settings.playerPaths[key] || '', 0)
+  }
+}
+
 export function usePlayer() {
-  return { play, playWith, resumeEpisodeOf }
+  return { play, playWith, playFile, resumeEpisodeOf }
 }

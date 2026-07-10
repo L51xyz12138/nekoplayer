@@ -17,18 +17,21 @@
     </filter>
   </defs>
 
-  <rect width="1024" height="1024" rx="240" fill="url(#bg)"/>
-  <rect width="1024" height="1024" rx="240" fill="url(#glow)"/>
+  <!-- 整幅缩到 ~80% 居中，四周留 ~10% 透明边（macOS 应用图标规范，否则显得比别的图标大一圈） -->
+  <g transform="translate(102.4 102.4) scale(0.8)">
+    <rect width="1024" height="1024" rx="240" fill="url(#bg)"/>
+    <rect width="1024" height="1024" rx="240" fill="url(#glow)"/>
 
-  <!-- 猫耳 -->
-  <g fill="#ffffff" stroke="#ffffff" stroke-width="30" stroke-linejoin="round">
-    <path d="M330 430 L360 258 L470 372 Z"/>
-    <path d="M694 430 L664 258 L554 372 Z"/>
+    <!-- 猫耳 -->
+    <g fill="#ffffff" stroke="#ffffff" stroke-width="30" stroke-linejoin="round">
+      <path d="M330 430 L360 258 L470 372 Z"/>
+      <path d="M694 430 L664 258 L554 372 Z"/>
+    </g>
+
+    <!-- 白色圆盘 -->
+    <circle cx="512" cy="558" r="292" fill="#ffffff" filter="url(#soft)"/>
+
+    <!-- 播放键 -->
+    <path d="M474 466 L628 558 L474 650 Z" fill="url(#pl)" stroke="url(#pl)" stroke-width="42" stroke-linejoin="round"/>
   </g>
-
-  <!-- 白色圆盘 -->
-  <circle cx="512" cy="558" r="292" fill="#ffffff" filter="url(#soft)"/>
-
-  <!-- 播放键 -->
-  <path d="M474 466 L628 558 L474 650 Z" fill="url(#pl)" stroke="url(#pl)" stroke-width="42" stroke-linejoin="round"/>
 </svg>
