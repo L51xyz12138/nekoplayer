@@ -24,7 +24,8 @@ const {
   loadSeasons,
   saveMetaOverride,
   clearMetaOverride,
-  removeManualSeries
+  removeManualSeries,
+  probeFileTech
 } = useLibrary()
 const player = usePlayer()
 
@@ -72,6 +73,8 @@ watch(
     if (it && it.type === 'series' && !it.seasons && !it.id.startsWith('local-series:')) {
       loadSeasons(it.id)
     }
+    // 文件源条目：按需探测视频格式信息（分辨率/编码等）
+    if (it && (it.localPath || it.id.startsWith('local-series:'))) void probeFileTech(it)
   },
   { immediate: true }
 )
@@ -144,7 +147,7 @@ function playItem(m: MediaItem) {
       />
 
       <div class="detail__body">
-        <div v-if="filePath" class="detail__file" :title="filePath">
+        <div v-if="filePath && !item.tech" class="detail__file" :title="filePath">
           <span class="detail__file-label">{{ item.localPath ? '文件' : '文件夹' }}</span>
           <code class="detail__file-path">{{ filePath }}</code>
         </div>

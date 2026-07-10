@@ -17,7 +17,7 @@ import { parseEpisode, scrapeMedia, type ScrapeResult, type TmdbConfig } from '@
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import { pget, pset } from './persist'
-import type { LibraryCategory, MediaItem, SortMode } from '@/types/media'
+import type { LibraryCategory, MediaItem, MediaTech, SortMode } from '@/types/media'
 import type { MediaSource } from '@/types/source'
 import type { NekoVideoFile } from '@/types/native'
 
@@ -462,6 +462,88 @@ function clearMetaOverride(id: string) {
   delete overrides[id]
   pset(OVERRIDE_KEY, JSON.stringify(overrides))
   reaggregateFiles()
+}
+
+// ---- 文件源视频媒体信息探测（tech，用 mpv）----
+const PROBE_KEY = 'neko-probe-cache'
+const PROBE_VER = '2' // 探测字段变了（加文件大小/码率）就 +1，旧缓存作废重探
+function loadProbeCache(): Record<string, MediaTech> {
+  try {
+    if (pget('neko-probe-ver') !== PROBE_VER) return {}
+    const raw = pget(PROBE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, MediaTech>) : {}
+  } catch {
+    return {}
+  }
+}
+const probeCache: Record<string, MediaTech> = loadProbeCache()
+let probeTimer: ReturnType<typeof setTimeout> | undefined
+function saveProbeCache() {
+  if (probeTimer) clearTimeout(probeTimer)
+  probeTimer = setTimeout(() => {
+    pset(PROBE_KEY, JSON.stringify(probeCache))
+    pset('neko-probe-ver', PROBE_VER)
+  }, 800)
+}
+function humanSize(n: number): string {
+  if (!n) return '—'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let v = n
+  let i = 0
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
+}
+interface ProbeInfo {
+  width: number
+  height: number
+  duration: number
+  videoCodec: string
+  audioCodec: string
+  channels: number
+  gamma: string
+  size: number
+}
+function buildTech(path: string, info: ProbeInfo): MediaTech {
+  const h = info.height
+  const quality =
+    h >= 2000 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : h ? h + 'P' : '—'
+  const hdr = /pq|hlg|smpte2084|arib-std-b67|2020/i.test(info.gamma) ? 'HDR' : 'SDR'
+  const ext = (path.split(/[?#]/)[0].split('.').pop() || '').toUpperCase()
+  return {
+    resolution: info.width && info.height ? `${info.width}×${info.height}` : '—',
+    quality,
+    dynamicRange: hdr,
+    videoCodec: (info.videoCodec || '—').toUpperCase(),
+    audioCodec: (info.audioCodec || '—').toUpperCase() + (info.channels ? ` · ${info.channels}ch` : ''),
+    fileSize: humanSize(info.size),
+    bitrate:
+      info.size && info.duration ? Math.round((info.size * 8) / info.duration / 1000) + ' kbps' : '—',
+    container: ext || '—',
+    filePath: path,
+    resolutions: [],
+    audioTracks: []
+  }
+}
+
+/** 探测文件源条目媒体信息并挂到 item.tech（缓存、按需，需 mpv）；剧集探首集作代表 */
+async function probeFileTech(item: MediaItem) {
+  const nn = window.nekoNative
+  if (!nn?.probeMedia || item.tech) return
+  const path = item.localPath || item.seasons?.[0]?.episodes?.[0]?.localPath
+  if (!path) return
+  if (probeCache[path]) {
+    item.tech = probeCache[path]
+    return
+  }
+  const info = await nn.probeMedia(path, useSettings().settings.playerPaths.mpv || '')
+  if (!info || !info.width) return // 没探到真实画面信息（mpv 缺失等）→ 不显示半空的信息框，保留路径行
+  const tech = buildTech(path, info)
+  probeCache[path] = tech
+  item.tech = tech
+  saveProbeCache()
 }
 
 /** 后台刮削文件源条目（仅未命中缓存的走网络），更新条目并写缓存 */
@@ -1054,6 +1136,7 @@ export function useLibrary() {
     scrapeByName,
     clearMetaOverride,
     saveManualSeries,
-    removeManualSeries
+    removeManualSeries,
+    probeFileTech
   }
 }

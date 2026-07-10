@@ -783,6 +783,88 @@ ipcMain.handle('check-mpv', (_e, mpvPath) => {
   return { ok, path: ok ? resolved : '' }
 })
 
+// 用 mpv 探测视频媒体信息（分辨率/编码/时长等），供文件源详情页显示。--term-playing-msg 展开属性、好解析
+function probeMedia(file, mpvPath) {
+  return new Promise((resolve) => {
+    let out = ''
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      const m = out.match(/NEKO\|([^\r\n]*)/)
+      if (!m) return resolve(null)
+      const f = m[1].split('|')
+      resolve({
+        width: +f[0] || 0,
+        height: +f[1] || 0,
+        fps: parseFloat(f[2]) || 0,
+        videoCodec: f[3] || '',
+        audioCodec: f[4] || '',
+        channels: +f[5] || 0,
+        sampleRate: +f[6] || 0,
+        duration: parseFloat(f[7]) || 0,
+        gamma: f[8] || '',
+        size: +f[9] || 0
+      })
+    }
+    try {
+      const p = spawn(
+        resolveMpv(mpvPath || settingsMpvPath()),
+        [
+          file,
+          '--no-config',
+          '--vo=null',
+          '--ao=null',
+          '--frames=1',
+          '--quiet',
+          '--term-playing-msg=NEKO|${=width}|${=height}|${container-fps}|${video-format}|${audio-codec-name}|${audio-params/channel-count}|${audio-params/samplerate}|${=duration}|${video-params/gamma}|${=file-size}'
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe'] }
+      )
+      p.stdout.on('data', (d) => (out += d.toString()))
+      p.stderr.on('data', (d) => (out += d.toString()))
+      p.on('exit', finish)
+      p.on('error', () => resolve(null))
+      setTimeout(() => {
+        try {
+          p.kill()
+        } catch {
+          /* ignore */
+        }
+        finish()
+      }, 15000)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+ipcMain.handle('probe-media', async (_e, payload) => {
+  const { file, mpvPath } = payload || {}
+  if (!file) return null
+  const info = await probeMedia(file, mpvPath)
+  let size = info?.size || 0
+  // mpv 没给大小时兜底：http 直链走 HEAD 拿 Content-Length，本机/UNC 走 stat
+  if (!size) {
+    if (/^https?:\/\//i.test(file)) {
+      try {
+        const r = await fetch(file, { method: 'HEAD' })
+        const l = r.headers.get('content-length')
+        if (l) size = parseInt(l, 10) || 0
+      } catch {
+        /* ignore */
+      }
+    } else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(file)) {
+      try {
+        size = (await stat(file)).size
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (!info && !size) return null
+  return { ...(info || {}), size }
+})
+
 // 标题栏悬浮按钮区的配色（跟随亮/暗）：与 theme.css 的 --bg-1 一致
 // 与 App 背景渐变的「顶色」(theme.css 的 --bg-0) 一致，让右上角悬浮按钮区尽量融入内容
 function titlebarColors(light) {

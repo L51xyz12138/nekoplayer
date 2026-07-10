@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('nekoNative', {
   scanDlna: (config) => ipcRenderer.invoke('scan-dlna', config),
   getThumb: (file, mpvPath) => ipcRenderer.invoke('get-thumb', { file, mpvPath }),
   checkMpv: (mpvPath) => ipcRenderer.invoke('check-mpv', mpvPath),
+  // 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小）
+  probeMedia: (file, mpvPath) => ipcRenderer.invoke('probe-media', { file, mpvPath }),
   // 亮/暗切换时同步标题栏悬浮按钮区配色（Windows）
   setTitlebarTheme: (light) => ipcRenderer.send('set-titlebar-theme', light)
 })
