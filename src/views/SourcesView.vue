@@ -57,7 +57,9 @@ function closeDialog() {
   editing.value = null
 }
 function browse(source: MediaSource) {
-  // 所有源（含本机存储）都进聚合媒体库，按该源过滤（本机视频已并入库）
+  // 停用的源不进媒体库，点击不跳转
+  if (!source.enabled) return
+  // 所有启用的源（含本机存储）都进聚合媒体库，按该源过滤（本机视频已并入库）
   setActiveSource(source.id)
   router.push('/')
 }

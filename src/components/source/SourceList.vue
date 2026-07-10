@@ -48,7 +48,14 @@ function errorFor(s: MediaSource): string {
 
 <template>
   <ul class="slist">
-    <li v-for="s in sources" :key="s.id" class="src" @click="emit('browse', s)">
+    <li
+      v-for="s in sources"
+      :key="s.id"
+      class="src"
+      :class="{ 'src--off': !s.enabled }"
+      :title="s.enabled ? '点击浏览该源内容' : '已停用（先启用才能浏览）'"
+      @click="s.enabled && emit('browse', s)"
+    >
       <div
         class="src__icon"
         :style="{ color: sourceKindMeta(s.kind).accent, background: sourceKindMeta(s.kind).accent + '22' }"
@@ -108,6 +115,20 @@ function errorFor(s: MediaSource): string {
 .src:hover {
   border-color: var(--border-strong);
   background: var(--surface-2);
+}
+/* 停用的源：不可点击浏览、信息置灰（开关/编辑/删除仍可用） */
+.src--off {
+  cursor: default;
+}
+.src--off:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+.src--off .src__icon,
+.src--off .src__main,
+.src--off .src__status,
+.src--off .src__count {
+  opacity: 0.42;
 }
 
 .src__icon {

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir, networkInterfaces } from 'node:os'
@@ -37,9 +37,15 @@ try {
 }
 let storeWriteTimer = null
 function flushStore() {
-  storeWriteTimer = null
+  if (storeWriteTimer) {
+    clearTimeout(storeWriteTimer)
+    storeWriteTimer = null
+  }
   try {
-    writeFileSync(STORE_FILE, JSON.stringify(persistStore))
+    // 原子写：先写临时文件再 rename 覆盖，避免写一半被更新器强杀导致 json 损坏、整份存储丢失
+    const tmp = STORE_FILE + '.tmp'
+    writeFileSync(tmp, JSON.stringify(persistStore))
+    renameSync(tmp, STORE_FILE)
   } catch (e) {
     console.error('[store] 写入失败：', e.message)
   }
@@ -48,12 +54,16 @@ function scheduleFlush() {
   if (storeWriteTimer) clearTimeout(storeWriteTimer)
   storeWriteTimer = setTimeout(flushStore, 150) // 合并连续写入，减少磁盘 IO
 }
+// 媒体源/设置是关键小数据、变更也少 → 立即落盘（写在主进程，不阻塞渲染进程输入），
+// 避免「刚加了源/填了 Key，还没到去抖时间就被软件更新器强杀」导致丢失。大而频繁的库缓存仍走去抖。
+const IMMEDIATE_KEYS = new Set(['neko-sources', 'neko-settings'])
 ipcMain.on('store-get', (e, key) => {
   e.returnValue = persistStore[key] ?? null
 })
 ipcMain.on('store-set', (_e, { key, val }) => {
   persistStore[key] = val
-  scheduleFlush()
+  if (IMMEDIATE_KEYS.has(key)) flushStore()
+  else scheduleFlush()
 })
 ipcMain.on('store-remove', (_e, key) => {
   delete persistStore[key]
