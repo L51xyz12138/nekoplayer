@@ -1,6 +1,8 @@
 // Emby / Jellyfin 媒体服务器 API 客户端
 // 动态服务器地址：支持连接任意公网 / 局域网服务器（Electron webSecurity:false 免跨域）
 
+import type { MediaTracks } from '@/types/media'
+
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
 const APP_VERSION = __APP_VERSION__ // 构建时注入自 package.json（见 vite.config）
@@ -55,18 +57,27 @@ export interface EmbyMediaStream {
   Codec?: string
   Language?: string
   DisplayTitle?: string
+  Title?: string
   Width?: number
   Height?: number
   Channels?: number
   BitRate?: number
   IsDefault?: boolean
+  /** 视频动态范围，如 SDR/HDR/HDR10/DOVI/HLG（判 HDR 用） */
+  VideoRange?: string
+  /** 在所有流里的绝对序号（视频/音频/字幕混排）；排序后各类型自 1 计得到 mpv 轨道号 */
+  Index?: number
+  /** 外挂轨道（独立文件，不在 Static 直连流里，mpv 看不到）——预选时需排除 */
+  IsExternal?: boolean
 }
 
 export interface EmbyMediaSource {
+  Id?: string
   Container?: string
   Size?: number
   Bitrate?: number
   Path?: string
+  DirectStreamUrl?: string
   MediaStreams?: EmbyMediaStream[]
 }
 
@@ -290,6 +301,101 @@ export async function getMpvPlayback(
     url = `${session.serverUrl}/Videos/${itemId}/stream.${container}?${q}`
   }
   return { url, playSessionId }
+}
+
+/** Emby/Jellyfin 条目的媒体信息（供详情页预选轨道 + 显示视频格式/文件路径） */
+export interface EmbyMediaInfo {
+  tracks: MediaTracks
+  /** 服务器上的文件路径 */
+  path: string
+  container: string
+  /** 文件字节数 */
+  size: number
+  /** 总码率 bit/s */
+  bitrate: number
+  video?: { width: number; height: number; codec: string; range: string }
+  /** 首条（默认）音轨的编码/声道，供技术信息展示 */
+  audioPrimary?: { codec: string; channels: number }
+  /** 直连流地址（与 getMpvPlayback 同构）；魔改 Emby 无 MediaStreams 时拿它给 mpv 探测，省一次请求 */
+  streamUrl: string
+}
+
+/** 取 Emby/Jellyfin 条目的媒体信息：音轨/字幕（供预选）+ 视频格式/文件路径（供技术信息）。
+ * 轨道只取**内封**流（外挂轨道不在 Static 直连流里，mpv 看不到）；按 Index 排序后音轨/字幕
+ * 各自 1-based 编号即 mpv `--aid`/`--sid`（Static 直连原文件，轨道顺序与 mpv 一致）。 */
+export async function getMediaInfo(session: EmbySession, itemId: string): Promise<EmbyMediaInfo> {
+  const res = await request(
+    session.serverUrl,
+    `/Users/${session.userId}/Items/${itemId}?Fields=MediaSources`,
+    session.token
+  )
+  const data = await res.json()
+  const src = data.MediaSources?.[0]
+  const streams: EmbyMediaStream[] = src?.MediaStreams || data.MediaStreams || []
+  const embedded = streams
+    .filter((st) => !st.IsExternal)
+    .sort((a, b) => (a.Index ?? 0) - (b.Index ?? 0))
+  const audio: MediaTracks['audio'] = []
+  const sub: MediaTracks['sub'] = []
+  for (const st of embedded) {
+    if (st.Type === 'Audio') {
+      audio.push({
+        id: audio.length + 1,
+        lang: st.Language || '',
+        title: st.DisplayTitle || st.Title || '',
+        codec: st.Codec || ''
+      })
+    } else if (st.Type === 'Subtitle') {
+      sub.push({
+        id: sub.length + 1,
+        lang: st.Language || '',
+        title: st.DisplayTitle || st.Title || '',
+        codec: st.Codec || ''
+      })
+    }
+  }
+  const v = embedded.find((st) => st.Type === 'Video')
+  const a = embedded.find((st) => st.Type === 'Audio')
+  // 直连流地址（与 getMpvPlayback 同构），供魔改 Emby 的 mpv 探测复用，避免再请求一次条目详情
+  let streamUrl = ''
+  if (src?.DirectStreamUrl) {
+    let ds = src.DirectStreamUrl
+    if (!/[?&]api_key=/i.test(ds)) ds += (ds.includes('?') ? '&' : '?') + 'api_key=' + session.token
+    streamUrl = `${session.serverUrl}${ds}`
+  } else {
+    const q = new URLSearchParams({
+      Static: 'true',
+      MediaSourceId: src?.Id ?? itemId,
+      api_key: session.token
+    })
+    streamUrl = `${session.serverUrl}/Videos/${itemId}/stream.${src?.Container || 'mkv'}?${q}`
+  }
+  return {
+    tracks: { audio, sub },
+    path: src?.Path || '',
+    container: src?.Container || '',
+    size: src?.Size || 0,
+    bitrate: src?.Bitrate || 0,
+    video: v ? { width: v.Width || 0, height: v.Height || 0, codec: v.Codec || '', range: v.VideoRange || '' } : undefined,
+    audioPrimary: a ? { codec: a.Codec || '', channels: a.Channels || 0 } : undefined,
+    streamUrl
+  }
+}
+
+/** 取某演职人员参演的库内条目（用于「发现作品」）。返回原始 EmbyItem，由 mapper 映射。 */
+export async function getPersonItems(session: EmbySession, personId: string): Promise<EmbyItem[]> {
+  const q = new URLSearchParams({
+    PersonIds: personId,
+    Recursive: 'true',
+    IncludeItemTypes: 'Movie,Series',
+    SortBy: 'ProductionYear,SortName',
+    SortOrder: 'Descending',
+    Fields: 'Overview,Genres,ProductionYear,CommunityRating,OfficialRating',
+    Limit: '60'
+  })
+  const res = await request(session.serverUrl, `/Users/${session.userId}/Items?${q}`, session.token)
+  const data = await res.json()
+  return (data.Items || []) as EmbyItem[]
 }
 
 /** 收藏 / 取消收藏（写回服务器） */

@@ -10,9 +10,9 @@ defineProps<{ tech: MediaTech }>()
     <h2 class="tech__title">文件信息</h2>
 
     <div class="tech__tags">
-      <span class="tag tag--accent">{{ tech.quality }}</span>
-      <span class="tag">{{ tech.dynamicRange }}</span>
-      <span class="tag">{{ tech.container }}</span>
+      <span v-if="tech.quality !== '—'" class="tag tag--accent">{{ tech.quality }}</span>
+      <span v-if="tech.dynamicRange !== '—'" class="tag">{{ tech.dynamicRange }}</span>
+      <span v-if="tech.container !== '—'" class="tag">{{ tech.container }}</span>
     </div>
 
     <div class="tech__grid">

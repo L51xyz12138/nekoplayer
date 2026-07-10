@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -213,7 +213,7 @@ function mpvSettingArgs() {
 
 // 渲染进程请求用 mpv 播放（items: [{ url, title }]）
 ipcMain.handle('play-mpv', (_e, payload) => {
-  const { items, title, startIndex, mpvPath, startSec, emby } = payload || {}
+  const { items, title, startIndex, mpvPath, startSec, emby, tracks } = payload || {}
   const list = Array.isArray(items) ? items : []
   if (!list.length) return false
 
@@ -232,20 +232,36 @@ ipcMain.handle('play-mpv', (_e, payload) => {
       ? `\\\\.\\pipe\\nekompv${Date.now()}`
       : path.join(tmpdir(), `nekompv-${Date.now()}.sock`)
 
+  // 指定平台专属硬解码器：hwdec=auto 会逐一探测各 GPU 后端，实测拖慢启动 ~0.7s+；给准确值直接省掉探测
+  const hwdec =
+    process.platform === 'darwin'
+      ? 'videotoolbox'
+      : process.platform === 'win32'
+        ? 'd3d11va'
+        : 'auto-safe'
   const args = [
     `--title=${title || 'NekoPlayer'}`,
-    '--force-window=yes',
+    // immediate：mpv 一启动就立刻建窗（不必等打开文件/连上网络流），网络流下「窗口迟迟不弹」明显改善
+    '--force-window=immediate',
     '--keep-open=no',
-    '--hwdec=auto',
+    `--hwdec=${hwdec}`,
     '--autofit-larger=90%x90%',
     '--geometry=50%:50%',
     `--config-dir=${MPV_CONFIG_DIR}`,
     `--input-ipc-server=${ipcSocket}`,
+    // macOS 显示原生标题栏（红绿灯在左上角）；mpv.conf 的 border=no 只适合 win/linux 的 uosc 无边框风格
+    ...(process.platform === 'darwin' ? ['--border=yes'] : []),
     // 音轨/字幕/跳章节等按设置（放在默认项之后，同名参数后者覆盖）
     ...mpvSettingArgs()
   ]
   // 从上次进度续播
   if (typeof startSec === 'number' && startSec > 0) args.push(`--start=${startSec}`)
+  // 详情页预选的音轨/字幕（覆盖设置里的语言偏好，故放最后）
+  if (tracks) {
+    if (typeof tracks.aid === 'number') args.push(`--aid=${tracks.aid}`)
+    if (tracks.sid === 'no') args.push('--sid=no')
+    else if (typeof tracks.sid === 'number') args.push(`--sid=${tracks.sid}`)
+  }
 
   let target
   if (list.length === 1) {
@@ -294,18 +310,51 @@ ipcMain.handle('play-mpv', (_e, payload) => {
   }
 })
 
+// 启动某个具体的播放器可执行文件，并挂上错误回调：未安装/路径不对(ENOENT 等)会弹窗提示而非静默失败或崩溃
+function spawnPlayer(bin, args, label) {
+  const child = spawn(bin, args, { stdio: 'ignore' })
+  child.on('error', (e) => {
+    console.error(`[external] ${label} 启动失败：`, e.message)
+    dialog.showErrorBox(
+      '无法启动播放器',
+      `未能启动 ${label}。\n请确认已安装，或在「设置 → 播放器路径」里填写它的可执行文件路径。`
+    )
+  })
+  return child
+}
+
+// win32 各外部播放器的可执行文件候选 + 参数
+function winPlayer(player, url, seek) {
+  const map = {
+    potplayer: {
+      name: 'PotPlayer',
+      paths: [
+        'C:/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe',
+        'C:/Program Files (x86)/DAUM/PotPlayer/PotPlayerMini.exe'
+      ],
+      args: seek ? [url, `/seek=${seek}`] : [url]
+    },
+    vlc: {
+      name: 'VLC',
+      paths: ['C:/Program Files/VideoLAN/VLC/vlc.exe', 'C:/Program Files (x86)/VideoLAN/VLC/vlc.exe'],
+      args: seek ? [`--start-time=${seek}`, url] : [url]
+    }
+  }
+  return map[player]
+}
+
 // 唤起系统外部播放器（各平台，支持自定义程序路径）
 function openExternal(player, url, customPath, startSec) {
   const seek = typeof startSec === 'number' && startSec > 0 ? startSec : 0
   try {
     if (process.platform === 'darwin') {
-      const appMap = { iina: 'IINA', vlc: 'VLC' }
+      const appMap = { iina: 'IINA', vlc: 'VLC', infuse: 'Infuse' }
       if (customPath) {
         // IINA：用 .app 内的 iina-cli 精确调用（可传 --mpv-start 续播），绕过 LaunchServices
         if (player === 'iina') {
           const cli = path.join(customPath, 'Contents/MacOS/iina-cli')
           if (existsSync(cli)) {
-            spawn(cli, seek ? [`--mpv-start=${seek}`, url] : [url], { stdio: 'ignore' })
+            spawnPlayer(cli, seek ? [`--mpv-start=${seek}`, url] : [url], 'IINA')
             return true
           }
         }
@@ -315,19 +364,23 @@ function openExternal(player, url, customPath, startSec) {
       spawn('open', ['-a', appMap[player] || player, url], { stdio: 'ignore' })
       return true
     }
-    if (process.platform === 'win32' && player === 'potplayer') {
-      const candidates = [
-        customPath,
-        'C:/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe',
-        'C:/Program Files (x86)/DAUM/PotPlayer/PotPlayerMini.exe'
-      ].filter(Boolean)
-      const bin = candidates.find((p) => existsSync(p)) || 'potplayer'
-      spawn(bin, seek ? [url, `/seek=${seek}`] : [url], { stdio: 'ignore' })
+    if (process.platform === 'win32' && (player === 'potplayer' || player === 'vlc')) {
+      const cfg = winPlayer(player, url, seek)
+      const bin = [customPath, ...cfg.paths].filter(Boolean).find((p) => existsSync(p))
+      if (!bin) {
+        // 标准安装位置和自定义路径都没找到 → 明确告知而非报晦涩错误
+        dialog.showErrorBox(
+          '未找到播放器',
+          `未找到 ${cfg.name}。\n请先安装 ${cfg.name}，或在「设置 → 播放器路径」里填写它的 exe 路径。`
+        )
+        return false
+      }
+      spawnPlayer(bin, cfg.args, cfg.name)
       return true
     }
     if (process.platform === 'linux' && player === 'vlc') {
       const bin = customPath && existsSync(customPath) ? customPath : 'vlc'
-      spawn(bin, seek ? [`--start-time=${seek}`, url] : [url], { stdio: 'ignore' })
+      spawnPlayer(bin, seek ? [`--start-time=${seek}`, url] : [url], 'VLC')
       return true
     }
     // 兜底：交给系统默认程序打开
@@ -783,6 +836,26 @@ ipcMain.handle('check-mpv', (_e, mpvPath) => {
   return { ok, path: ok ? resolved : '' }
 })
 
+// 从 mpv 输出解析音轨/字幕轨道列表（● 选中 / ○ 未选）
+function parseTracks(out) {
+  const audio = []
+  const sub = []
+  const re =
+    /(?:[●○]|\(\+?\))\s*(Audio|Subs?)\s+--[as]id=(\d+)(?:\s+--[as]lang=(\S+))?(?:\s+'([^']*)')?(?:\s+\(([^)]*)\))?/gi
+  let m
+  while ((m = re.exec(out))) {
+    const t = {
+      id: +m[2],
+      lang: m[3] || '',
+      title: m[4] || '',
+      codec: (m[5] || '').trim().split(/[\s,]/)[0] || ''
+    }
+    if (/^Audio/i.test(m[1])) audio.push(t)
+    else sub.push(t)
+  }
+  return { audio, sub }
+}
+
 // 用 mpv 探测视频媒体信息（分辨率/编码/时长等），供文件源详情页显示。--term-playing-msg 展开属性、好解析
 function probeMedia(file, mpvPath) {
   return new Promise((resolve) => {
@@ -791,8 +864,16 @@ function probeMedia(file, mpvPath) {
     const finish = () => {
       if (done) return
       done = true
+      const tracks = parseTracks(out)
       const m = out.match(/NEKO\|([^\r\n]*)/)
-      if (!m) return resolve(null)
+      if (!m) {
+        // 没解出画面属性行（如远程流没解到帧就超时）；轨道行在打开时已打印，至少把轨道带回
+        return resolve(
+          tracks.audio.length || tracks.sub.length
+            ? { width: 0, height: 0, fps: 0, videoCodec: '', audioCodec: '', channels: 0, sampleRate: 0, duration: 0, gamma: '', size: 0, tracks }
+            : null
+        )
+      }
       const f = m[1].split('|')
       resolve({
         width: +f[0] || 0,
@@ -804,7 +885,8 @@ function probeMedia(file, mpvPath) {
         sampleRate: +f[6] || 0,
         duration: parseFloat(f[7]) || 0,
         gamma: f[8] || '',
-        size: +f[9] || 0
+        size: +f[9] || 0,
+        tracks
       })
     }
     try {
@@ -923,6 +1005,11 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+  // 站外链接（如关于页的 GitHub 地址）用系统默认浏览器打开，别在应用内新开窗口
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    return { action: 'deny' }
+  })
   mainWin = win
 }
 

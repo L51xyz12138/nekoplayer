@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Home, Clapperboard, Server, Settings } from 'lucide-vue-next'
+import { Clapperboard, Server, Settings } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
+import iconUrl from '@/assets/icon.svg'
 
 const route = useRoute()
 
@@ -20,8 +21,8 @@ function isActive(name: string) {
 
 <template>
   <aside class="rail">
-    <RouterLink to="/" class="rail__logo" title="返回主页">
-      <Home :size="24" :stroke-width="2.5" />
+    <RouterLink to="/" class="rail__logo" title="NekoPlayer · 返回主页">
+      <img :src="iconUrl" alt="NekoPlayer" draggable="false" />
     </RouterLink>
 
     <nav class="rail__nav">
@@ -69,10 +70,14 @@ function isActive(name: string) {
   height: 46px;
   margin-bottom: 10px;
   border-radius: 14px;
-  color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  overflow: hidden;
   box-shadow: 0 8px 22px var(--accent-glow);
   transition: transform var(--dur) var(--ease);
+}
+.rail__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .rail__logo:hover {
   transform: translateY(-1px);

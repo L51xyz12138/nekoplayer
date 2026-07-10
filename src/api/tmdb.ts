@@ -1,6 +1,6 @@
 // 文件源视频的元数据刮削（TMDB）。
 // Emby/Jellyfin 由服务器自己刮削；文件浏览类源（本机/WebDAV/SMB/DLNA）无服务器，故由软件用 TMDB 自刮。
-import type { Person } from '@/types/media'
+import type { MediaItem, Person } from '@/types/media'
 
 export interface TmdbConfig {
   key: string
@@ -193,4 +193,44 @@ export async function scrapeMedia(
     }
   }
   return result
+}
+
+/** 取某演职人员的 TMDB 参演作品（文件源「发现作品」用；仅展示，不在库、不可播）。
+ * 按人气去重排序，映射为轻量 MediaItem（有海报/标题/年份/评分）。 */
+export async function getPersonCredits(personId: string, cfg: TmdbConfig): Promise<MediaItem[]> {
+  try {
+    const url = `${cfg.apiBase}/person/${personId}/combined_credits?api_key=${cfg.key}&language=${cfg.lang}`
+    const d = await fetch(url).then((r) => r.json())
+    const cast = Array.isArray(d.cast) ? d.cast : []
+    const seen = new Set<number>()
+    const works: MediaItem[] = []
+    for (const c of cast.sort((a: any, b: any) => (b.popularity || 0) - (a.popularity || 0))) {
+      if (!c.id || seen.has(c.id)) continue
+      seen.add(c.id)
+      const title = c.title || c.name || ''
+      if (!title) continue
+      const isTv = c.media_type === 'tv'
+      const date = c.release_date || c.first_air_date || ''
+      works.push({
+        id: `tmdb-person-work:${c.media_type}:${c.id}`,
+        sourceId: '',
+        title,
+        type: isTv ? 'series' : 'movie',
+        year: date ? parseInt(date.slice(0, 4), 10) || 0 : 0,
+        runtime: 0,
+        rating: c.vote_average || 0,
+        certification: '',
+        genres: [],
+        overview: c.overview || '',
+        cast: [],
+        addedAt: 0,
+        posterUrl: c.poster_path ? cfg.imgBase + c.poster_path : undefined,
+        scraped: true
+      })
+      if (works.length >= 40) break
+    }
+    return works
+  } catch {
+    return []
+  }
 }

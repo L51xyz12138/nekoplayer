@@ -36,8 +36,8 @@ const nn = window.nekoNative
 const players: string[] = nn?.playMpv
   ? (
       {
-        darwin: ['mpv', 'IINA', 'VLC'],
-        win32: ['mpv', 'PotPlayer'],
+        darwin: ['mpv', 'IINA', 'VLC', 'Infuse'],
+        win32: ['mpv', 'PotPlayer', 'VLC'],
         linux: ['mpv', 'VLC']
       } as Record<string, string[]>
     )[nn.platform ?? 'darwin'] ?? []

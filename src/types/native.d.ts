@@ -21,14 +21,15 @@ export interface NekoNative {
   isElectron: true
   /** process.platform：'darwin' | 'win32' | 'linux' | … */
   platform: string
-  /** mpv 本地解码播放（支持整季播放列表 + 起始索引 + 续播秒数 + 进度回传） */
+  /** mpv 本地解码播放（支持整季播放列表 + 起始索引 + 续播秒数 + 进度回传 + 预选音轨/字幕） */
   playMpv(
     items: NekoPlayItem[],
     title: string,
     startIndex?: number,
     mpvPath?: string,
     startSec?: number,
-    emby?: NekoEmbyProgress
+    emby?: NekoEmbyProgress,
+    tracks?: { aid?: number; sid?: number | 'no' }
   ): Promise<boolean>
   /** 唤起系统外部播放器（iina/vlc/potplayer） */
   playExternal(player: string, url: string, appPath?: string, startSec?: number): Promise<boolean>
@@ -56,7 +57,7 @@ export interface NekoNative {
   getThumb(file: string, mpvPath?: string): Promise<string | null>
   /** 检查 mpv 是否可用（传入自定义路径优先）；ok=false 表示需用户填路径 */
   checkMpv(mpvPath?: string): Promise<{ ok: boolean; path: string }>
-  /** 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小）；失败返回 null */
+  /** 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小 + 音轨/字幕轨道列表）；失败返回 null */
   probeMedia(
     file: string,
     mpvPath?: string
@@ -71,9 +72,18 @@ export interface NekoNative {
     duration: number
     gamma: string
     size: number
+    tracks: { audio: NekoTrackInfo[]; sub: NekoTrackInfo[] }
   } | null>
   /** 亮/暗切换时同步标题栏悬浮窗口按钮区的配色（仅 Windows 生效） */
   setTitlebarTheme(light: boolean): void
+}
+
+/** mpv 探测到的单条音轨/字幕（id 用于 --aid/--sid） */
+export interface NekoTrackInfo {
+  id: number
+  lang: string
+  title: string
+  codec: string
 }
 
 /** 发现到的 DLNA 服务器 */

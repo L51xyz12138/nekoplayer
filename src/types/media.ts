@@ -107,6 +107,26 @@ export interface MediaItem {
   scraped?: boolean
   /** 文件源剧集分集信息（从文件名解析）；有则该文件是某剧的一集，会被聚合成剧集 */
   episodeInfo?: { show: string; season: number; episode: number; epTitle: string }
+  /** 音轨/字幕轨道（文件源用 mpv 探测得到，供详情页预选）；剧集取代表集 */
+  tracks?: MediaTracks
+}
+
+/** 单条音轨/字幕轨道（供详情页预选，传 mpv --aid/--sid） */
+export interface MediaTrack {
+  /** mpv 轨道号（同类型内 1-based，用于 --aid/--sid） */
+  id: number
+  /** 语言代码，如 jpn/eng/chi */
+  lang: string
+  /** 轨道标题 */
+  title: string
+  /** 编码，如 aac/subrip */
+  codec: string
+}
+
+/** 一个视频的音轨与字幕轨道集合 */
+export interface MediaTracks {
+  audio: MediaTrack[]
+  sub: MediaTrack[]
 }
 
 /** 媒体文件技术信息 */

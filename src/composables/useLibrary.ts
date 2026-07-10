@@ -4,20 +4,29 @@ import {
   getEpisodes,
   getItem,
   getItems,
+  getMediaInfo,
   getNextUp,
+  getPersonItems,
   getResume,
   getViews,
   setFavorite,
   setPlayed,
+  type EmbyMediaInfo,
   type EmbyItem,
   type EmbySession
 } from '@/api/emby'
 import { mapEmbyItem, mapEpisodes, mapNextUp, progressOf } from '@/api/mapper'
-import { parseEpisode, scrapeMedia, type ScrapeResult, type TmdbConfig } from '@/api/tmdb'
+import {
+  getPersonCredits,
+  parseEpisode,
+  scrapeMedia,
+  type ScrapeResult,
+  type TmdbConfig
+} from '@/api/tmdb'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import { pget, pset } from './persist'
-import type { LibraryCategory, MediaItem, MediaTech, SortMode } from '@/types/media'
+import type { LibraryCategory, MediaItem, MediaTech, MediaTracks, SortMode } from '@/types/media'
 import type { MediaSource } from '@/types/source'
 import type { NekoVideoFile } from '@/types/native'
 
@@ -466,17 +475,22 @@ function clearMetaOverride(id: string) {
 
 // ---- 文件源视频媒体信息探测（tech，用 mpv）----
 const PROBE_KEY = 'neko-probe-cache'
-const PROBE_VER = '2' // 探测字段变了（加文件大小/码率）就 +1，旧缓存作废重探
-function loadProbeCache(): Record<string, MediaTech> {
+const PROBE_VER = '3' // 探测字段变了（加音轨/字幕轨道）就 +1，旧缓存作废重探
+/** 一条探测结果：技术信息 + 轨道列表 */
+interface ProbeEntry {
+  tech: MediaTech
+  tracks: MediaTracks
+}
+function loadProbeCache(): Record<string, ProbeEntry> {
   try {
     if (pget('neko-probe-ver') !== PROBE_VER) return {}
     const raw = pget(PROBE_KEY)
-    return raw ? (JSON.parse(raw) as Record<string, MediaTech>) : {}
+    return raw ? (JSON.parse(raw) as Record<string, ProbeEntry>) : {}
   } catch {
     return {}
   }
 }
-const probeCache: Record<string, MediaTech> = loadProbeCache()
+const probeCache: Record<string, ProbeEntry> = loadProbeCache()
 let probeTimer: ReturnType<typeof setTimeout> | undefined
 function saveProbeCache() {
   if (probeTimer) clearTimeout(probeTimer)
@@ -528,22 +542,131 @@ function buildTech(path: string, info: ProbeInfo): MediaTech {
   }
 }
 
-/** 探测文件源条目媒体信息并挂到 item.tech（缓存、按需，需 mpv）；剧集探首集作代表 */
+/** 探测文件源条目媒体信息 + 轨道并挂到 item.tech/tracks（缓存、按需，需 mpv）；剧集探首集作代表 */
 async function probeFileTech(item: MediaItem) {
   const nn = window.nekoNative
   if (!nn?.probeMedia || item.tech) return
   const path = item.localPath || item.seasons?.[0]?.episodes?.[0]?.localPath
   if (!path) return
-  if (probeCache[path]) {
-    item.tech = probeCache[path]
+  const cached = probeCache[path]
+  if (cached) {
+    item.tech = cached.tech
+    item.tracks = cached.tracks
     return
   }
   const info = await nn.probeMedia(path, useSettings().settings.playerPaths.mpv || '')
   if (!info || !info.width) return // 没探到真实画面信息（mpv 缺失等）→ 不显示半空的信息框，保留路径行
   const tech = buildTech(path, info)
-  probeCache[path] = tech
+  const tracks: MediaTracks = info.tracks || { audio: [], sub: [] }
+  probeCache[path] = { tech, tracks }
   item.tech = tech
+  item.tracks = tracks
   saveProbeCache()
+}
+
+// 从 Emby 媒体信息组技术信息。总返回一个（哪怕无视频流也带回大小/码率/路径，先即时显示）；
+// 分辨率/编码/HDR 缺失时用 '—' 占位，随后由 mpv 探测覆盖成完整值。
+function buildEmbyTech(info: EmbyMediaInfo): MediaTech {
+  const v = info.video
+  const h = v?.height || 0
+  const quality =
+    h >= 2000 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : h ? h + 'P' : '—'
+  const hdr = v ? (/hdr|hlg|dovi|dolby|pq|2020/i.test(v.range) ? 'HDR' : 'SDR') : '—'
+  const ext = (info.container || info.path.split(/[?#]/)[0].split('.').pop() || '').toUpperCase()
+  const a = info.audioPrimary
+  return {
+    resolution: v?.width && v?.height ? `${v.width}×${v.height}` : '—',
+    quality,
+    dynamicRange: hdr,
+    videoCodec: v?.codec ? v.codec.toUpperCase() : '—',
+    audioCodec: a ? (a.codec || '—').toUpperCase() + (a.channels ? ` · ${a.channels}ch` : '') : '—',
+    fileSize: humanSize(info.size),
+    bitrate: info.bitrate ? Math.round(info.bitrate / 1000) + ' kbps' : '—',
+    container: ext || '—',
+    filePath: info.path || '',
+    resolutions: [],
+    audioTracks: []
+  }
+}
+
+// Emby/Jellyfin 条目媒体信息（内存缓存，按取轨的目标 id）；供详情页音轨/字幕预选 + 视频格式/路径
+const embyTracksCache: Record<string, { tracks: MediaTracks; tech?: MediaTech }> = {}
+/** 拉 Emby/Jellyfin 条目的音轨/字幕 + 视频格式/路径挂到 item（详情页按需）。
+ * 电影取自身；剧集取代表集（续看集/第一集，需季集已加载，未加载则等加载后重调）。 */
+async function loadEmbyTracks(item: MediaItem) {
+  if (item.tracks || item.localPath || item.id.startsWith('local-series:') || item.type === 'collection')
+    return
+  const s = useSources().sessionOf(item.sourceId)
+  if (!s) return // 非 Emby/Jellyfin 源（无会话）
+  let targetId = item.id
+  if (item.type === 'series') {
+    const eps = item.seasons?.flatMap((se) => se.episodes) ?? []
+    if (!eps.length) return // 季集还没加载完，seasons 到位后 DetailView 会再调
+    const rep =
+      eps.find((e) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 1) ||
+      eps.find((e) => !e.watched) ||
+      eps[0]
+    targetId = rep.id
+  }
+  const cached = embyTracksCache[targetId]
+  if (cached) {
+    item.tracks = cached.tracks
+    if (cached.tech) item.tech = cached.tech
+    return
+  }
+  try {
+    const info = await getMediaInfo(s, targetId)
+    let tracks = info.tracks
+    let tech = buildEmbyTech(info)
+    // 服务器信息先即时上屏（大小/码率/路径；标准 Emby 还含分辨率/编码）——让「文件信息」框先出来，不空等探测
+    item.tech = tech
+    // 魔改/网盘版 Emby 常不返回 MediaStreams（实测 tv.bmhyk.vip 连 PlaybackInfo 都空）→ 用自带 mpv 探测直连流
+    // 补齐分辨率/编码/HDR + 轨道（复用 info.streamUrl，省一次条目详情请求；轨道号必与播放一致）
+    if (!info.video || (!tracks.audio.length && !tracks.sub.length)) {
+      const nn = window.nekoNative
+      if (nn?.probeMedia && info.streamUrl) {
+        const probe = await nn.probeMedia(info.streamUrl, useSettings().settings.playerPaths.mpv || '')
+        if (probe?.tracks && (probe.tracks.audio.length || probe.tracks.sub.length)) tracks = probe.tracks
+        // 探到真实画面 → 用探测结果覆盖成完整技术信息（路径优先用服务器给的）
+        if (probe?.width) {
+          tech = buildTech(info.path || info.streamUrl.split('?')[0], probe)
+          item.tech = tech
+        }
+      }
+    }
+    embyTracksCache[targetId] = { tracks, tech }
+    item.tracks = tracks
+  } catch {
+    /* 取信息失败：忽略（播放器里仍可切轨） */
+  }
+}
+
+// 把外部拉到的条目并入库（按 id 去重），使详情页 getById 能找到、可导航
+function mergeItems(list: MediaItem[]) {
+  const have = new Set(state.items.map((m) => m.id))
+  const add = list.filter((m) => !have.has(m.id))
+  if (add.length) state.items.push(...add)
+}
+/** 「发现作品」：取某演职人员的参演作品。
+ * Emby/Jellyfin → 库内条目（并入库、可点开可播）；文件源 → TMDB 组合作品（仅展示、不可播）。 */
+async function loadPersonWorks(sourceId: string, personId: string): Promise<MediaItem[]> {
+  const s = useSources().sessionOf(sourceId)
+  if (s) {
+    const raw = await getPersonItems(s, personId).catch(() => [] as EmbyItem[])
+    const works = raw.map((it) => mapEmbyItem(it, s))
+    mergeItems(works)
+    return works
+  }
+  // 文件源：无服务器，走 TMDB combined_credits（人物 id 即 TMDB person id）
+  const settings = useSettings().settings
+  if (!settings.tmdbKey) return []
+  const cfg: TmdbConfig = {
+    key: settings.tmdbKey,
+    lang: settings.tmdbLang || 'zh-CN',
+    apiBase: settings.tmdbApiBase || 'https://api.themoviedb.org/3',
+    imgBase: settings.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
+  }
+  return getPersonCredits(personId, cfg)
 }
 
 /** 后台刮削文件源条目（仅未命中缓存的走网络），更新条目并写缓存 */
@@ -1137,6 +1260,8 @@ export function useLibrary() {
     clearMetaOverride,
     saveManualSeries,
     removeManualSeries,
-    probeFileTech
+    probeFileTech,
+    loadEmbyTracks,
+    loadPersonWorks
   }
 }

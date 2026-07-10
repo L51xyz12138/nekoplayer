@@ -7,6 +7,12 @@ import type { Episode, MediaItem } from '@/types/media'
 // NekoPlayer 为 Electron 优先：播放统一交给外部播放器（mpv/IINA/VLC/PotPlayer），无内置 web 播放器。
 // 纯浏览器（无 window.nekoNative）下 play 静默返回。
 
+/** 详情页预选的音轨/字幕（仅 mpv 生效）；aid/sid 为 mpv 同类型轨道号，sid='no' 关字幕 */
+export interface PlayTracks {
+  aid?: number
+  sid?: number | 'no'
+}
+
 /**
  * 剧集续播目标集，多路兜底：
  * 1) nextUp（Emby Resume/NextUp 按最近活动算出的续看点，最准——避免选到早期的旧半看集）
@@ -27,38 +33,38 @@ function resumeEpisodeOf(item: MediaItem): Episode | undefined {
 }
 
 // 剧集未指定集时：确保季集已加载，再播「续看的那集/第一集」
-async function playSeriesResume(item: MediaItem, player: string) {
+async function playSeriesResume(item: MediaItem, player: string, tracks?: PlayTracks) {
   const { loadSeasons } = useLibrary()
   if (!item.seasons) await loadSeasons(item.id)
   const resume = resumeEpisodeOf(item)
-  if (resume) playWith(item, resume, player)
+  if (resume) playWith(item, resume, player, tracks)
 }
 
 /** 播放入口：Electron 下交给外部播放器（按设置的默认播放器）；剧集未指定集则播续看集 */
-function play(item: MediaItem, episode?: Episode) {
+function play(item: MediaItem, episode?: Episode, tracks?: PlayTracks) {
   if (!window.nekoNative?.playMpv) return // 非 Electron：无内置播放器
   // 本机存储视频：直接播文件，无服务器进度同步
   if (item.localPath) {
-    playFile(item.localPath, item.title)
+    playFile(item.localPath, item.title, undefined, tracks)
     return
   }
   const player = useSettings().settings.playerMode
-  if (item.type === 'series' && !episode) void playSeriesResume(item, player)
-  else playWith(item, episode, player)
+  if (item.type === 'series' && !episode) void playSeriesResume(item, player, tracks)
+  else playWith(item, episode, player, tracks)
 }
 
-/** 用指定播放器播放（mpv/IINA/VLC/PotPlayer）；剧集带整季播放列表 */
-function playWith(item: MediaItem, episode: Episode | undefined, player: string) {
+/** 用指定播放器播放（mpv/IINA/VLC/PotPlayer）；剧集带整季播放列表；tracks 为详情页预选音轨/字幕 */
+function playWith(item: MediaItem, episode: Episode | undefined, player: string, tracks?: PlayTracks) {
   const native = window.nekoNative
   if (!native?.playMpv) return
   // 文件源剧集分集：播分集文件
   if (episode?.localPath) {
-    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player)
+    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player, tracks)
     return
   }
   // 文件源电影：直接用指定播放器播文件（无服务器进度同步）
   if (item.localPath) {
-    playFile(item.localPath, item.title, player)
+    playFile(item.localPath, item.title, player, tracks)
     return
   }
   const s = useSources().sessionOf(item.sourceId)
@@ -96,14 +102,22 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
       const psid = infos[startAt].playSessionId || `neko${Date.now()}`
       const playItemId = queue.length ? queue[startAt].id : targetId
       if (player === 'mpv') {
-        native.playMpv!(playItems, label, startAt, settings.playerPaths.mpv || '', startSec, {
-          serverUrl: s.serverUrl,
-          token: s.token,
-          userId: s.userId,
-          deviceId: localStorage.getItem('neko-device-id') || '',
-          itemId: playItemId,
-          playSessionId: psid
-        })
+        native.playMpv!(
+          playItems,
+          label,
+          startAt,
+          settings.playerPaths.mpv || '',
+          startSec,
+          {
+            serverUrl: s.serverUrl,
+            token: s.token,
+            userId: s.userId,
+            deviceId: localStorage.getItem('neko-device-id') || '',
+            itemId: playItemId,
+            playSessionId: psid
+          },
+          tracks
+        )
       } else if (native.playExternal) {
         const key = player.toLowerCase()
         native.playExternal(key, playItems[startAt].url, settings.playerPaths[key] || '', startSec)
@@ -113,14 +127,14 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string)
     .catch((e) => console.error('[NekoPlayer] 取流失败：', e))
 }
 
-/** 播放本机/文件浏览类源的文件（外部播放器，无进度同步）；player 省略则用默认播放器 */
-function playFile(filePath: string, title: string, player?: string) {
+/** 播放本机/文件浏览类源的文件（外部播放器，无进度同步）；player 省略则用默认播放器；tracks 仅 mpv 生效 */
+function playFile(filePath: string, title: string, player?: string, tracks?: PlayTracks) {
   const native = window.nekoNative
   if (!native?.playMpv) return
   const { settings } = useSettings()
   player = player || settings.playerMode
   if (player === 'mpv') {
-    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0)
+    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0, undefined, tracks)
   } else if (native.playExternal) {
     const key = player.toLowerCase()
     native.playExternal(key, filePath, settings.playerPaths[key] || '', 0)

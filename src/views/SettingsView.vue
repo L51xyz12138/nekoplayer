@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Check, Palette, Film, Captions, Info, Clapperboard } from 'lucide-vue-next'
+import { Check, Palette, Film, Captions, Info, Clapperboard, Github } from 'lucide-vue-next'
 import Segmented from '@/components/common/Segmented.vue'
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { useSettings } from '@/composables/useSettings'
@@ -15,8 +15,8 @@ const platform = window.nekoNative?.platform ?? 'darwin'
 const playerOptions: string[] =
   (
     {
-      darwin: ['mpv', 'IINA', 'VLC'],
-      win32: ['mpv', 'PotPlayer'],
+      darwin: ['mpv', 'IINA', 'VLC', 'Infuse'],
+      win32: ['mpv', 'PotPlayer', 'VLC'],
       linux: ['mpv', 'VLC']
     } as Record<string, string[]>
   )[platform] ?? ['mpv']
@@ -222,6 +222,9 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
             <h3>NekoPlayer <span>v{{ appVersion }}</span></h3>
             <p>跨平台媒体播放器 · 支持 Emby / Jellyfin / 本机 / WebDAV / SMB / DLNA</p>
             <p class="about__stack">Vue 3 · Vite · TypeScript · 由浮浮酱精心打造 ฅ'ω'ฅ</p>
+            <a class="about__repo" href="https://github.com/L51xyz12138/nekoplayer" target="_blank" rel="noreferrer">
+              <Github :size="15" /> github.com/L51xyz12138/nekoplayer
+            </a>
           </div>
         </div>
       </section>
@@ -372,6 +375,19 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
 }
 .about__stack {
   color: var(--text-mute) !important;
+}
+.about__repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  transition: color var(--dur) var(--ease);
+}
+.about__repo:hover {
+  color: var(--accent-2);
 }
 
 .path-cell {

@@ -5,8 +5,8 @@ contextBridge.exposeInMainWorld('nekoNative', {
   isElectron: true,
   platform: process.platform,
   // mpv 本地解码播放（items + 起始索引 + 自定义 mpv 路径），支持整季播放列表
-  playMpv: (items, title, startIndex, mpvPath, startSec, emby) =>
-    ipcRenderer.invoke('play-mpv', { items, title, startIndex, mpvPath, startSec, emby }),
+  playMpv: (items, title, startIndex, mpvPath, startSec, emby, tracks) =>
+    ipcRenderer.invoke('play-mpv', { items, title, startIndex, mpvPath, startSec, emby, tracks }),
   // 唤起系统外部播放器（iina / vlc / potplayer），支持自定义程序路径 + 起始秒数
   playExternal: (player, url, appPath, startSec) =>
     ipcRenderer.invoke('play-external', { player, url, appPath, startSec }),

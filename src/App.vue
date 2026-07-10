@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import SideBar from '@/components/layout/SideBar.vue'
-import iconUrl from '@/assets/icon.svg'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSettings } from '@/composables/useSettings'
 import { useHotkeys } from '@/composables/useHotkeys'
-
-// macOS 下标题栏左侧要让开红绿灯
-const isMac = window.nekoNative?.platform === 'darwin'
 
 const { loadFromEmby, refreshAfterPlayback } = useLibrary()
 
@@ -27,11 +23,8 @@ onMounted(() => {
 
 <template>
   <div class="app">
-    <!-- 无原生标题栏：自绘一条拉通到顶的标题栏（左：图标+名称，右：悬浮系统窗口按钮），整条可拖拽 -->
-    <div class="app__titlebar" :class="{ 'app__titlebar--mac': isMac }">
-      <img class="app__logo" :src="iconUrl" alt="" draggable="false" />
-      <span class="app__name">NekoPlayer</span>
-    </div>
+    <!-- 无原生标题栏：留一条拉通到顶、可拖拽的空条，只承载系统窗口按钮（min/全屏/关闭）；图标已移到侧栏顶部 -->
+    <div class="app__titlebar" />
     <div class="app__row">
       <SideBar />
       <main class="app__main">
@@ -60,28 +53,9 @@ onMounted(() => {
 .app__titlebar {
   height: 44px;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 0 16px;
   /* 透明：让 .app 的渐变直接流过，与内容区完全一致（overlay 用渐变顶色 --bg-0 近似匹配） */
   background: transparent;
   -webkit-app-region: drag;
-}
-.app__titlebar--mac {
-  padding-left: 80px;
-}
-.app__logo {
-  width: 27px;
-  height: 27px;
-  flex-shrink: 0;
-  border-radius: 7px;
-}
-.app__name {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-dim);
 }
 .app__row {
   display: flex;

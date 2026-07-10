@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
-import { Layers, Server, HardDrive, Cloud, Network, Cast } from 'lucide-vue-next'
+import { type Component, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Layers, Server, HardDrive, Cloud, Network, Cast, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
+import { wheelToHorizontal } from '@/utils/scroll'
 import type { SourceKind } from '@/types/source'
 
-const { sources } = useSources()
+// 只显示启用的源（停用的不进媒体库、也不占标签位）
+const { enabledSources } = useSources()
 const { activeSourceId, setActiveSource } = useLibrary()
 
 const kindIcon: Partial<Record<SourceKind, Component>> = {
@@ -17,39 +19,77 @@ const kindIcon: Partial<Record<SourceKind, Component>> = {
 function iconFor(kind: SourceKind): Component {
   return kindIcon[kind] ?? Server
 }
+
+// 溢出时显示左右滚动按钮（桌面鼠标无法横向滚动，与「媒体库」筹码行一致）
+const track = ref<HTMLElement>()
+const canLeft = ref(false)
+const canRight = ref(false)
+const overflowing = ref(false)
+function update() {
+  const el = track.value
+  if (!el) return
+  overflowing.value = el.scrollWidth > el.clientWidth + 4
+  canLeft.value = el.scrollLeft > 4
+  canRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 4
+}
+function scroll(dir: number) {
+  const el = track.value
+  if (el) el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: 'smooth' })
+}
+onMounted(() => {
+  update()
+  window.addEventListener('resize', update)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', update))
+watch(enabledSources, () => nextTick(update))
 </script>
 
 <template>
-  <div class="stabs no-scrollbar">
-    <button
-      class="stab"
-      :class="{ on: activeSourceId === 'all' }"
-      @click="setActiveSource('all')"
-    >
-      <Layers :size="16" />
-      全部资料库
-    </button>
-    <button
-      v-for="s in sources"
-      :key="s.id"
-      class="stab"
-      :class="{ on: activeSourceId === s.id }"
-      @click="setActiveSource(s.id)"
-    >
-      <component :is="iconFor(s.kind)" :size="16" />
-      {{ s.name }}
-      <span v-if="!s.enabled" class="stab__off">停用</span>
-    </button>
+  <div class="stabs-wrap">
+    <div ref="track" class="stabs no-scrollbar" @scroll="update" @wheel="wheelToHorizontal">
+      <button class="stab" :class="{ on: activeSourceId === 'all' }" @click="setActiveSource('all')">
+        <Layers :size="16" />
+        全部资料库
+      </button>
+      <button
+        v-for="s in enabledSources"
+        :key="s.id"
+        class="stab"
+        :class="{ on: activeSourceId === s.id }"
+        @click="setActiveSource(s.id)"
+      >
+        <component :is="iconFor(s.kind)" :size="16" />
+        {{ s.name }}
+      </button>
+    </div>
+
+    <!-- 到头则禁用而非消失，位置不跳（与 LibraryTabs 一致） -->
+    <div v-if="overflowing" class="stabs-nav-group">
+      <button class="stabs-nav" title="向左" :disabled="!canLeft" @click="scroll(-1)">
+        <ChevronLeft :size="16" />
+      </button>
+      <button class="stabs-nav" title="向右" :disabled="!canRight" @click="scroll(1)">
+        <ChevronRight :size="16" />
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.stabs-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
 .stabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  margin-bottom: 16px;
   padding-bottom: 2px;
+  scroll-behavior: smooth;
 }
 .stab {
   display: inline-flex;
@@ -76,11 +116,28 @@ function iconFor(kind: SourceKind): Component {
   border-color: transparent;
   box-shadow: 0 8px 20px var(--accent-glow);
 }
-.stab__off {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 7px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.14);
+
+.stabs-nav-group {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+}
+.stabs-nav {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  transition: background var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+.stabs-nav:not(:disabled):hover {
+  background: var(--surface-hover);
+}
+.stabs-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 </style>

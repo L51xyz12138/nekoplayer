@@ -7,11 +7,12 @@ import EditMetaDialog from '@/components/detail/EditMetaDialog.vue'
 import EpisodeList from '@/components/detail/EpisodeList.vue'
 import CastRow from '@/components/detail/CastRow.vue'
 import MediaTechInfo from '@/components/detail/MediaTechInfo.vue'
+import TrackPicker from '@/components/detail/TrackPicker.vue'
 import MediaRow from '@/components/library/MediaRow.vue'
 import PosterCard from '@/components/library/PosterCard.vue'
 import { useLibrary } from '@/composables/useLibrary'
-import { usePlayer } from '@/composables/usePlayer'
-import type { Episode, MediaItem } from '@/types/media'
+import { usePlayer, type PlayTracks } from '@/composables/usePlayer'
+import type { Episode, MediaItem, Person } from '@/types/media'
 
 const props = defineProps<{ id: string }>()
 
@@ -25,7 +26,8 @@ const {
   saveMetaOverride,
   clearMetaOverride,
   removeManualSeries,
-  probeFileTech
+  probeFileTech,
+  loadEmbyTracks
 } = useLibrary()
 const player = usePlayer()
 
@@ -40,6 +42,17 @@ const isFileItem = computed(() => {
 const isManualSeries = computed(() => item.value?.id.startsWith('local-series:manual:') ?? false)
 // 文件源：显示视频文件地址（电影=文件路径/URL；剧集=所在文件夹）
 const filePath = computed(() => item.value?.localPath || item.value?.folder || '')
+
+// 详情页预选的音轨/字幕（仅文件源，探测到多轨时可选）；undefined=默认（跟随设置语言偏好）
+const selAid = ref<number | undefined>(undefined)
+const selSid = ref<number | 'no' | undefined>(undefined)
+const selectedTracks = computed<PlayTracks | undefined>(() => {
+  const t: PlayTracks = {}
+  if (selAid.value !== undefined) t.aid = selAid.value
+  if (selSid.value !== undefined) t.sid = selSid.value
+  return t.aid !== undefined || t.sid !== undefined ? t : undefined
+})
+
 const editOpen = ref(false)
 function onSaveMeta(data: Partial<MediaItem>) {
   if (item.value) saveMetaOverride(item.value.id, data)
@@ -66,17 +79,35 @@ const related = computed(() => {
 
 // 剧集：懒加载季/集列表。监听 item 对象本身——loadFromEmby（刷新/播放结束）会用
 // 无 seasons 的新对象替换 item，此时需为新对象重新加载，否则剧集列表会消失
+// 按条目类型拉音轨/字幕：文件源用 mpv 探测，Emby/Jellyfin 读 MediaStreams
+function ensureTracks(it: MediaItem) {
+  if (it.localPath || it.id.startsWith('local-series:')) void probeFileTech(it)
+  else if (it.type !== 'collection') void loadEmbyTracks(it)
+}
+
 watch(
   item,
-  (it) => {
+  (it, prev) => {
     // 文件源剧集的季集是聚合时就建好的（id 前缀 local-series:），无需也不能走 Emby loadSeasons
     if (it && it.type === 'series' && !it.seasons && !it.id.startsWith('local-series:')) {
       loadSeasons(it.id)
     }
-    // 文件源条目：按需探测视频格式信息（分辨率/编码等）
-    if (it && (it.localPath || it.id.startsWith('local-series:'))) void probeFileTech(it)
+    // 按需拉取轨道（分辨率/编码 + 音轨/字幕）
+    if (it) ensureTracks(it)
+    // 切换到不同条目：重置音轨/字幕预选（不同视频轨道不同）
+    if (it?.id !== prev?.id) {
+      selAid.value = undefined
+      selSid.value = undefined
+    }
   },
   { immediate: true }
+)
+// Emby 剧集的代表集轨道要等季集异步加载完才能取 → seasons 到位后补拉一次
+watch(
+  () => item.value?.seasons,
+  () => {
+    if (item.value) ensureTracks(item.value)
+  }
 )
 
 // 滚过 Hero 一定距离后，顶栏渐显磨砂背景 + 标题
@@ -91,22 +122,22 @@ function play() {
   if (it.type === 'series') {
     // 剧集：播续看的那一集（优先 NextUp），没有则播第一集
     const resume = player.resumeEpisodeOf(it)
-    if (resume) player.play(it, resume)
+    if (resume) player.play(it, resume, selectedTracks.value)
   } else {
-    player.play(it)
+    player.play(it, undefined, selectedTracks.value)
   }
 }
 function playEpisode(ep: Episode) {
-  if (item.value) player.play(item.value, ep)
+  if (item.value) player.play(item.value, ep, selectedTracks.value)
 }
 function playWith(playerName: string) {
   const it = item.value
   if (!it) return
   if (it.type === 'series') {
     const resume = player.resumeEpisodeOf(it)
-    if (resume) player.playWith(it, resume, playerName)
+    if (resume) player.playWith(it, resume, playerName, selectedTracks.value)
   } else {
-    player.playWith(it, undefined, playerName)
+    player.playWith(it, undefined, playerName, selectedTracks.value)
   }
 }
 function fav() {
@@ -117,6 +148,21 @@ function watched() {
 }
 function playItem(m: MediaItem) {
   player.play(m)
+}
+// 点演职人员 → 发现作品页（带上源 id + 人物 id + 名字/职务/头像）
+function onPerson(person: Person) {
+  const it = item.value
+  if (!it) return
+  router.push({
+    name: 'person',
+    query: {
+      sid: it.sourceId,
+      pid: person.id,
+      name: person.name,
+      role: person.role,
+      avatar: person.avatarUrl || ''
+    }
+  })
 }
 </script>
 
@@ -152,13 +198,19 @@ function playItem(m: MediaItem) {
           <code class="detail__file-path">{{ filePath }}</code>
         </div>
         <MediaTechInfo v-if="item.tech" :tech="item.tech" />
+        <TrackPicker
+          v-if="item.tracks"
+          :tracks="item.tracks"
+          v-model:aid="selAid"
+          v-model:sid="selSid"
+        />
         <EpisodeList
           v-if="item.type === 'series' && item.seasons"
           :seasons="item.seasons"
           :resume-id="resumeId"
           @play="playEpisode"
         />
-        <CastRow v-if="item.cast.length" title="演职人员" :people="item.cast" />
+        <CastRow v-if="item.cast.length" title="演职人员" :people="item.cast" @select="onPerson" />
         <MediaRow v-if="related.length" title="相关推荐" item-width="158px">
           <PosterCard
             v-for="it in related"
