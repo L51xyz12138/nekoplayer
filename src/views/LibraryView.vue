@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderTree, LayoutGrid } from 'lucide-vue-next'
+import { FolderTree, LayoutGrid, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import TopBar from '@/components/layout/TopBar.vue'
 import SourceTabs from '@/components/library/SourceTabs.vue'
 import LibraryTabs from '@/components/library/LibraryTabs.vue'
@@ -58,20 +58,39 @@ const fileGridItems = computed(() =>
 
 const player = usePlayer()
 
-// 首页精选轮播：多部循环切换，7s 自动切；切源/列表变化时重置
+// 首页精选轮播：多部循环切换，7s 自动切；切源/列表变化时重置。slideDir 决定滑入/滑出方向
 const heroIndex = ref(0)
+const slideDir = ref<'next' | 'prev'>('next')
 const heroItem = computed(() => featuredList.value[heroIndex.value] ?? featuredList.value[0])
 let heroTimer: ReturnType<typeof setInterval> | undefined
 function startHeroRotate() {
   clearInterval(heroTimer)
   heroTimer = setInterval(() => {
     const n = featuredList.value.length
-    if (n > 1) heroIndex.value = (heroIndex.value + 1) % n
+    if (n > 1) {
+      slideDir.value = 'next'
+      heroIndex.value = (heroIndex.value + 1) % n
+    }
   }, 7000)
 }
-function goHero(i: number) {
-  heroIndex.value = i
+function nextHero() {
+  const n = featuredList.value.length
+  if (n < 2) return
+  slideDir.value = 'next'
+  heroIndex.value = (heroIndex.value + 1) % n
   startHeroRotate() // 手动切后重置计时
+}
+function prevHero() {
+  const n = featuredList.value.length
+  if (n < 2) return
+  slideDir.value = 'prev'
+  heroIndex.value = (heroIndex.value - 1 + n) % n
+  startHeroRotate()
+}
+function goHero(i: number) {
+  slideDir.value = i >= heroIndex.value ? 'next' : 'prev'
+  heroIndex.value = i
+  startHeroRotate()
 }
 watch(featuredList, () => (heroIndex.value = 0))
 startHeroRotate()
@@ -184,19 +203,37 @@ function play(item: MediaItem) {
 
         <template v-else-if="browseMode">
           <div v-if="heroItem" class="library__hero">
-            <transition name="fade" mode="out-in">
-              <HeroBanner :key="heroItem.id" :item="heroItem" @play="play" />
-            </transition>
-            <div v-if="featuredList.length > 1" class="library__hero-dots">
-              <button
-                v-for="(f, i) in featuredList"
-                :key="f.id"
-                class="library__hero-dot"
-                :class="{ on: i === heroIndex }"
-                :title="f.title"
-                @click="goHero(i)"
-              />
+            <div class="library__hero-track">
+              <transition :name="'hero-' + slideDir">
+                <HeroBanner :key="heroItem.id" :item="heroItem" @play="play" />
+              </transition>
             </div>
+            <template v-if="featuredList.length > 1">
+              <button
+                class="library__hero-nav library__hero-nav--prev"
+                title="上一个"
+                @click="prevHero"
+              >
+                <ChevronLeft :size="26" />
+              </button>
+              <button
+                class="library__hero-nav library__hero-nav--next"
+                title="下一个"
+                @click="nextHero"
+              >
+                <ChevronRight :size="26" />
+              </button>
+              <div class="library__hero-dots">
+                <button
+                  v-for="(f, i) in featuredList"
+                  :key="f.id"
+                  class="library__hero-dot"
+                  :class="{ on: i === heroIndex }"
+                  :title="f.title"
+                  @click="goHero(i)"
+                />
+              </div>
+            </template>
           </div>
 
           <div class="library__body">
@@ -256,24 +293,73 @@ function play(item: MediaItem) {
 .library__hero {
   position: relative;
   padding: 6px 34px 0;
+  /* HeroBanner 自身不再带下边距，改由此处给与下方内容的间距 */
+  margin-bottom: 34px;
 }
+/* 轮播「视口」：裁掉滑动中溢出的旧/新横幅，实现旧滑出、新紧跟滑入（无空白） */
+.library__hero-track {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+}
+/* 悬浮时左右两侧的切换按钮 */
+.library__hero-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: var(--blur);
+  opacity: 0;
+  transform: translateY(-50%) scale(0.9);
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.library__hero:hover .library__hero-nav {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+.library__hero-nav:hover {
+  background: rgba(0, 0, 0, 0.72);
+}
+.library__hero-nav:active {
+  transform: translateY(-50%) scale(0.92);
+}
+.library__hero-nav--prev {
+  left: 16px;
+}
+.library__hero-nav--next {
+  right: 16px;
+}
+/* 底部居中触点：直接切到对应精选（active 拉长成胶囊） */
 .library__hero-dots {
   position: absolute;
-  bottom: 22px;
-  right: 52px;
-  z-index: 3;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
   display: flex;
-  gap: 8px;
+  gap: 9px;
+  padding: 7px 12px;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: var(--blur);
 }
 .library__hero-dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.35);
-  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+  background: rgba(255, 255, 255, 0.45);
+  transition: background var(--dur) var(--ease), width var(--dur) var(--ease);
 }
 .library__hero-dot:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.75);
 }
 .library__hero-dot.on {
   width: 22px;

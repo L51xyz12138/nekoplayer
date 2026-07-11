@@ -11,13 +11,14 @@ const emit = defineEmits<{ play: [item: MediaItem] }>()
 
 const router = useRouter()
 
+// 文件源条目 id 含斜杠/冒号，用具名路由让 vue-router 正确编码
 function openDetail() {
-  router.push(`/detail/${props.item.id}`)
+  router.push({ name: 'detail', params: { id: props.item.id } })
 }
 </script>
 
 <template>
-  <section class="hero">
+  <section class="hero" @click="openDetail">
     <div class="hero__bg">
       <PosterImage :seed="item.id" :src="item.backdropUrl" kind="backdrop" />
     </div>
@@ -44,10 +45,10 @@ function openDetail() {
       </div>
 
       <div class="hero__actions">
-        <IconButton variant="solid" label="播放" @click="emit('play', item)">
+        <IconButton variant="solid" label="播放" @click.stop="emit('play', item)">
           <Play :size="18" fill="currentColor" />
         </IconButton>
-        <IconButton variant="glass" label="更多信息" @click="openDetail">
+        <IconButton variant="glass" label="更多信息" @click.stop="openDetail">
           <Info :size="18" />
         </IconButton>
       </div>
@@ -61,7 +62,7 @@ function openDetail() {
   height: 420px;
   border-radius: var(--r-xl);
   overflow: hidden;
-  margin-bottom: 34px;
+  cursor: pointer;
 }
 .hero__bg {
   position: absolute;

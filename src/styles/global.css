@@ -86,6 +86,37 @@ ol {
   opacity: 0;
 }
 
+/* 首页精选轮播：重叠式滑动切换（同时进出——旧的绝对定位脱离文档流，与新的重叠、紧跟着切换、无空白） */
+.hero-next-enter-active,
+.hero-next-leave-active,
+.hero-prev-enter-active,
+.hero-prev-leave-active {
+  transition: transform 0.45s var(--ease);
+}
+/* 离场的绝对定位（相对 .library__hero-track），让进场的在文档流里定高、二者重叠。
+   ⚠️ 必须 !important：HeroBanner 作用域样式 .hero{position:relative} 特异性(0,2,0)高于本类(0,1,0)，
+   否则离场横幅仍在文档流里、与进场的上下堆叠 → 变两行、把下方内容顶下去、出现空白闪烁 */
+.hero-next-leave-active,
+.hero-prev-leave-active {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+/* next：新的从右滑入、旧的往左滑出；prev：反之 */
+.hero-next-enter-from {
+  transform: translateX(100%);
+}
+.hero-next-leave-to {
+  transform: translateX(-100%);
+}
+.hero-prev-enter-from {
+  transform: translateX(-100%);
+}
+.hero-prev-leave-to {
+  transform: translateX(100%);
+}
+
 /* 骨架屏微光：加载占位用，随主题深浅自适应 */
 .shimmer {
   position: relative;
