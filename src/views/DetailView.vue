@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, Pencil, Unlink } from 'lucide-vue-next'
+import { ArrowLeft, Pencil, Unlink, Film } from 'lucide-vue-next'
 import DetailHero from '@/components/detail/DetailHero.vue'
 import EditMetaDialog from '@/components/detail/EditMetaDialog.vue'
 import EpisodeList from '@/components/detail/EpisodeList.vue'
@@ -27,10 +27,12 @@ const {
   saveMetaOverride,
   clearMetaOverride,
   removeManualSeries,
+  disbandToMovies,
   probeFileTech,
   probeFileEpisode,
   loadEmbyTracks,
-  loadEmbyEpisode
+  loadEmbyEpisode,
+  loadEpisodeNames
 } = useLibrary()
 const player = usePlayer()
 
@@ -43,6 +45,10 @@ const isFileItem = computed(() => {
 })
 // 手动组成的剧集可「解散」
 const isManualSeries = computed(() => item.value?.id.startsWith('local-series:manual:') ?? false)
+// 文件源剧集（自动或手动聚合的）都能「拆成电影」——用于系列电影被误当剧集（如指环王三部曲）
+const isFileSeries = computed(
+  () => item.value?.type === 'series' && (item.value?.id.startsWith('local-series:') ?? false)
+)
 // 文件源：显示视频文件地址（电影=文件路径/URL；剧集=所在文件夹）
 const filePath = computed(() => item.value?.localPath || item.value?.folder || '')
 
@@ -67,6 +73,11 @@ function ungroup() {
   if (!item.value) return
   removeManualSeries(item.value.id)
   router.back()
+}
+function splitToMovies() {
+  if (!item.value) return
+  disbandToMovies(item.value)
+  router.back() // 该剧集条目已不存在，回上一页
 }
 
 // 续看集 id：用于剧集列表自动定位/高亮到「正在看的那一集」
@@ -137,6 +148,8 @@ watch(
     if (it.type === 'series') {
       // 文件源剧集季集聚合时已建（id 前缀 local-series:），Emby 剧集需懒加载
       if (!it.seasons && !it.id.startsWith('local-series:')) loadSeasons(it.id)
+      // 文件源剧集：用 TMDB 补每集真实集名/简介/剧照
+      if (it.id.startsWith('local-series:')) void loadEpisodeNames(it)
       // 默认聚焦续看集（seasons 已就绪时）
       if (!selectedEp.value) selectedEp.value = player.resumeEpisodeOf(it)
     } else {
@@ -151,6 +164,14 @@ watch(
   () => {
     const it = item.value
     if (it?.type === 'series' && !selectedEp.value) selectedEp.value = player.resumeEpisodeOf(it)
+  }
+)
+// 文件源剧集 tmdbId 就绪后（异步刮削完成 / 手动重新匹配）补每集真实集名
+watch(
+  () => item.value?.tmdbId,
+  () => {
+    const it = item.value
+    if (it?.id.startsWith('local-series:')) void loadEpisodeNames(it)
   }
 )
 // 聚焦集变化 → 加载该集文件信息/轨道 + 重置该集的轨道预选
@@ -228,12 +249,17 @@ function onPerson(person: Person) {
       <transition name="fade">
         <span v-if="scrolled" class="detail__topbar-title">{{ item.title }}</span>
       </transition>
-      <button v-if="isManualSeries" class="detail__edit" title="解散为单个视频" @click="ungroup">
-        <Unlink :size="15" /> 解散剧集
-      </button>
-      <button v-if="isFileItem" class="detail__edit" :class="{ 'detail__edit--sec': isManualSeries }" title="编辑元数据" @click="editOpen = true">
-        <Pencil :size="16" /> 编辑
-      </button>
+      <div v-if="isFileItem" class="detail__actions">
+        <button v-if="isFileSeries" class="detail__edit" title="拆成单独的电影（系列电影被误当剧集时）" @click="splitToMovies">
+          <Film :size="15" /> 拆成电影
+        </button>
+        <button v-if="isManualSeries" class="detail__edit" title="解散为单个视频" @click="ungroup">
+          <Unlink :size="15" /> 解散剧集
+        </button>
+        <button class="detail__edit" title="编辑元数据" @click="editOpen = true">
+          <Pencil :size="16" /> 编辑
+        </button>
+      </div>
     </header>
 
     <div class="detail__scroll" @scroll="onScroll">
@@ -346,11 +372,12 @@ function onPerson(person: Person) {
   font-size: 17px;
   font-weight: 700;
 }
-.detail__edit.detail__edit--sec {
-  margin-left: 10px;
+.detail__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
 }
 .detail__edit {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;

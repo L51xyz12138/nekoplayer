@@ -87,6 +87,7 @@ async function applyCandidate(cand: TmdbCandidate) {
       extra.backdropUrl = r.backdropUrl
       extra.rating = r.rating
       extra.tagline = r.tagline
+      extra.tmdbId = r.tmdbId // 存 TMDB id，剧集据此补每集真实集名
       matchMsg.value = `已选「${r.title}」${r.year ? ` (${r.year})` : ''}，点保存生效`
     }
     candidates.value = []

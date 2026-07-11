@@ -109,6 +109,8 @@ export interface MediaItem {
   folder?: string
   /** 文件源视频已成功刮削到 TMDB 元数据（有则展示海报/年份/评分，无则展示缩略图） */
   scraped?: boolean
+  /** TMDB 条目 id（文件源剧集用它拉每季分集的真实集名/简介/剧照） */
+  tmdbId?: number
   /** 文件源剧集分集信息（从文件名解析）；有则该文件是某剧的一集，会被聚合成剧集 */
   episodeInfo?: { show: string; season: number; episode: number; epTitle: string }
   /** 音轨/字幕轨道（文件源用 mpv 探测得到，供详情页预选）；剧集取代表集 */

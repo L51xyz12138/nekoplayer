@@ -20,6 +20,8 @@ export interface ScrapeResult {
   tagline?: string
   genres: string[]
   cast: Person[]
+  /** TMDB 条目 id（剧集用它再拉每季分集名/简介/剧照） */
+  tmdbId?: number
 }
 
 /** 「重新匹配」时的候选项（多个匹配让用户选） */
@@ -36,6 +38,10 @@ export interface TmdbCandidate {
 /** 海报用 w500 够了，但背景图铺满详情页需要更高分辨率 → 把尺寸段换成 w1280，避免模糊 */
 function backdropBase(imgBase: string): string {
   return imgBase.replace(/w\d+(\/?)$/, 'w1280$1')
+}
+/** 分集剧照（16:9）用 w300 即可，比海报的 w500 更贴合小卡片 */
+function stillBase(imgBase: string): string {
+  return imgBase.replace(/w\d+(\/?)$/, 'w300$1')
 }
 
 const VIDEO_EXT_RE =
@@ -166,7 +172,8 @@ export async function scrapeMedia(
     rating: hit.vote_average ? Math.round(hit.vote_average * 10) / 10 : 0,
     overview: hit.overview || '',
     genres: [],
-    cast: []
+    cast: [],
+    tmdbId: hit.id
   }
 
   // 拉详情 + 演职人员，丰富详情页（类型标签 / 背景图 / 演员 / 导演 / 相关推荐靠类型匹配）
@@ -287,6 +294,45 @@ export async function getTvSeasons(cfg: TmdbConfig, tvId: number): Promise<TmdbS
   }
 }
 
+/** 剧集某一季的一集（真实集名/简介/剧照） */
+export interface TmdbEpisode {
+  episode: number
+  title: string
+  overview: string
+  stillUrl?: string
+  runtime: number
+}
+
+/** 拉某剧某季的分集列表（真实集名/简介/剧照/时长），供文件源分集补名。按 episode_number 索引。 */
+export async function getTvEpisodes(
+  cfg: TmdbConfig,
+  tvId: number,
+  season: number
+): Promise<TmdbEpisode[]> {
+  try {
+    const q = new URLSearchParams({ api_key: cfg.key, language: cfg.lang })
+    const d = await fetch(`${cfg.apiBase}/tv/${tvId}/season/${season}?${q}`).then((r) => r.json())
+    const still = stillBase(cfg.imgBase)
+    return (d.episodes ?? [])
+      .filter((e: { episode_number?: number }) => e.episode_number != null)
+      .map((e: {
+        episode_number: number
+        name?: string
+        overview?: string
+        still_path?: string | null
+        runtime?: number
+      }) => ({
+        episode: e.episode_number,
+        title: e.name || '',
+        overview: e.overview || '',
+        stillUrl: e.still_path ? still + e.still_path : undefined,
+        runtime: e.runtime || 0
+      }))
+  } catch {
+    return []
+  }
+}
+
 /** 按选中的候选项拉完整元数据（含详情 + 演职人员）。 */
 export async function scrapeById(cfg: TmdbConfig, cand: TmdbCandidate): Promise<ScrapeResult> {
   const result: ScrapeResult = {
@@ -297,7 +343,8 @@ export async function scrapeById(cfg: TmdbConfig, cand: TmdbCandidate): Promise<
     rating: cand.rating,
     overview: cand.overview,
     genres: [],
-    cast: []
+    cast: [],
+    tmdbId: cand.id
   }
   await enrichFromDetails(cfg, cand.mediaType, cand.id, result)
   return result

@@ -18,6 +18,7 @@ import {
 import { mapEmbyItem, mapEpisodes, mapNextUp, progressOf } from '@/api/mapper'
 import {
   getPersonCredits,
+  getTvEpisodes,
   getTvSeasons,
   parseEpisode,
   scrapeById,
@@ -25,6 +26,7 @@ import {
   searchTmdb,
   type ScrapeResult,
   type TmdbCandidate,
+  type TmdbEpisode,
   type TmdbSeason,
   type TmdbConfig
 } from '@/api/tmdb'
@@ -341,7 +343,7 @@ function applyContinueWatching(
 // ---- 文件源刮削（TMDB）：结果按「文件名派生标题」缓存，命中即复用，未命中不重试 ----
 const SCRAPE_KEY = 'neko-scrape-cache'
 // 刮削结果格式版本：加了演员/类型等字段就 +1，旧缓存作废重刮（否则老条目一直没演员/相关推荐）
-const SCRAPE_VER = '3' // 背景图改用 w1280 高清 → +1 让旧的 w500 缓存重刮
+const SCRAPE_VER = '4' // 刮削结果加了 tmdbId（拉分集名用）→ +1 让旧缓存重刮补上
 function loadScrapeCache(): Record<string, ScrapeResult | null> {
   try {
     if (pget('neko-scrape-ver') !== SCRAPE_VER) return {} // 版本变了 → 清空重刮
@@ -376,6 +378,7 @@ function applyScrape(item: MediaItem, r: ScrapeResult) {
   if (r.tagline) item.tagline = r.tagline
   if (r.genres?.length) item.genres = r.genres
   if (r.cast?.length) item.cast = r.cast
+  if (r.tmdbId) item.tmdbId = r.tmdbId
   item.scraped = true
 }
 
@@ -442,6 +445,35 @@ async function loadTvSeasons(tvId: number): Promise<TmdbSeason[]> {
   return getTvSeasons(tmdbCfg(), tvId)
 }
 
+// TMDB 分集缓存（按 tmdbId:season），避免重复请求
+const tvEpisodeCache: Record<string, TmdbEpisode[]> = {}
+/** 文件源剧集：用 TMDB 分集数据填每集真实集名/简介/剧照/时长（详情页按需，按 episode 号对应）。
+ * 分集号来自文件名自然序，与 TMDB 对得上就填、对不上就保持「第 N 集」——尽力而为、不强求。 */
+async function loadEpisodeNames(item: MediaItem) {
+  if (!item.id.startsWith('local-series:') || !item.tmdbId || !item.seasons?.length) return
+  if (!useSettings().settings.tmdbKey) return
+  const cfg = tmdbCfg()
+  const tvId = item.tmdbId
+  for (const season of item.seasons) {
+    const key = `${tvId}:${season.season}`
+    let eps = tvEpisodeCache[key]
+    if (!eps) {
+      eps = await getTvEpisodes(cfg, tvId, season.season)
+      tvEpisodeCache[key] = eps
+    }
+    if (!eps.length) continue
+    const byNum = new Map(eps.map((e) => [e.episode, e]))
+    for (const ep of season.episodes) {
+      const te = byNum.get(ep.episode)
+      if (!te) continue
+      if (te.title) ep.title = te.title
+      if (te.overview) ep.overview = te.overview
+      if (te.stillUrl) ep.stillUrl = te.stillUrl
+      if (te.runtime) ep.runtime = te.runtime
+    }
+  }
+}
+
 // ---- 手动把散条目组成剧集 / 解散（自动聚合修不了时的兜底）----
 const MANUAL_KEY = 'neko-manual-series'
 interface ManualGroup {
@@ -457,6 +489,18 @@ function loadManual(): Record<string, ManualGroup> {
   }
 }
 const manualSeries: Record<string, ManualGroup> = loadManual()
+
+// 用户手动标记「这些视频是电影、别聚合成剧集」（如指环王三部曲被误当剧集时）；按视频 id 记
+const FORCE_MOVIES_KEY = 'neko-force-movies'
+function loadForceMovies(): Record<string, true> {
+  try {
+    const raw = pget(FORCE_MOVIES_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, true>) : {}
+  } catch {
+    return {}
+  }
+}
+const forceMovies: Record<string, true> = loadForceMovies()
 
 // 最近一次扫到的原始文件条目（未聚合），供手动分组后免重扫、就地重聚合
 let lastRawFileItems: MediaItem[] = []
@@ -486,6 +530,30 @@ function removeManualSeries(seriesId: string) {
   delete manualSeries[key]
   pset(MANUAL_KEY, JSON.stringify(manualSeries))
   reaggregateFiles()
+}
+
+/** 把一部（被误聚合的）剧集拆成单独的电影：成员视频标记为「强制电影」，不再参与聚合。
+ * 用于指环王三部曲这类「系列电影」被当成剧集时。 */
+function disbandToMovies(seriesItem: MediaItem) {
+  const ids = seriesItem.seasons?.flatMap((s) => s.episodes.map((e) => e.id)) ?? []
+  if (!ids.length) return
+  for (const id of ids) forceMovies[id] = true
+  pset(FORCE_MOVIES_KEY, JSON.stringify(forceMovies))
+  // 若它同时是手动剧集，也一并撤掉手动分组
+  if (seriesItem.id.startsWith('local-series:manual:')) {
+    delete manualSeries[seriesItem.id.replace('local-series:manual:', '')]
+    pset(MANUAL_KEY, JSON.stringify(manualSeries))
+  }
+  reaggregateFiles()
+}
+/** 撤销「强制电影」标记（还原自动识别）——供把误拆的重新交回自动聚合 */
+function clearForceMovies(ids: string[]) {
+  let changed = false
+  for (const id of ids) if (forceMovies[id]) (delete forceMovies[id], (changed = true))
+  if (changed) {
+    pset(FORCE_MOVIES_KEY, JSON.stringify(forceMovies))
+    reaggregateFiles()
+  }
 }
 
 /** 清除某条目的手动元数据覆盖，还原自动识别 */
@@ -880,6 +948,7 @@ function seriesShell(id: string, sourceId: string, showKey: string, addedAt: num
     addedAt,
     posterUrl: info?.posterUrl,
     backdropUrl: info?.backdropUrl,
+    tmdbId: info?.tmdbId,
     libraryId: 'file:other',
     libraryName: '其他',
     seasons: [],
@@ -930,6 +999,10 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
   }
   for (const m of items) {
     if (claimed.has(m.id)) continue
+    if (forceMovies[m.id]) {
+      out.push(m) // 用户手动标记为电影 → 原样保留、不聚合成剧集
+      continue
+    }
     const ep = m.episodeInfo
     if (!ep) {
       loose.push(m)
@@ -976,9 +1049,14 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
     g.push(m)
   }
   for (const g of byShowFolder.values()) {
-    // 电影合集文件夹（如三部曲）：都各自刮成了不同电影 → 保持电影。但 ≥5 个基本是剧集，直接聚合
+    // 电影合集（如指环王三部曲）判定 → 保持电影、不聚合。两种信号（任一即可，且都要求 <5 个）：
+    // ①每个视频各占一个子文件夹（指环王1/指环王2/… 各 1 个文件）——剧集的一季文件夹里是一堆分集，不会各占一夹；
+    // ②都各自刮成了不同电影名。≥5 个基本是剧集，直接聚合。
+    const distinctFolders = new Set(g.map((m) => m.folder ?? '')).size
     const isCollection =
-      g.length < 5 && g.every((m) => m.scraped) && new Set(g.map((m) => m.title)).size === g.length
+      g.length < 5 &&
+      (distinctFolders === g.length ||
+        (g.every((m) => m.scraped) && new Set(g.map((m) => m.title)).size === g.length))
     if (g.length < 3 || isCollection) {
       out.push(...g)
       continue
@@ -1327,9 +1405,11 @@ export function useLibrary() {
     searchByName,
     scrapeCandidate,
     loadTvSeasons,
+    loadEpisodeNames,
     clearMetaOverride,
     saveManualSeries,
     removeManualSeries,
+    disbandToMovies,
     probeFileTech,
     probeFileEpisode,
     loadEmbyTracks,
