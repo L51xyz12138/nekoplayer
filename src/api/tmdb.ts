@@ -22,6 +22,8 @@ export interface ScrapeResult {
   cast: Person[]
   /** TMDB 条目 id（剧集用它再拉每季分集名/简介/剧照） */
   tmdbId?: number
+  /** 电影所属 TMDB 系列（belongs_to_collection）——把散落的系列电影聚合成合集，不依赖文件夹 */
+  collection?: { id: number; name: string; posterUrl?: string; backdropUrl?: string }
 }
 
 /** 「重新匹配」时的候选项（多个匹配让用户选） */
@@ -122,6 +124,13 @@ interface TmdbDetails {
   backdrop_path?: string | null
   genres?: { id: number; name: string }[]
   credits?: { cast?: TmdbPerson[]; crew?: TmdbPerson[] }
+  /** 电影专属：所属系列（三部曲/系列电影）。剧集无此字段 */
+  belongs_to_collection?: {
+    id: number
+    name: string
+    poster_path?: string | null
+    backdrop_path?: string | null
+  } | null
 }
 
 /** 刮削单个文件名（forceTv=true 强制按剧集搜，用于已聚合的剧）→ 命中返回元数据，否则 null */
@@ -196,6 +205,16 @@ async function enrichFromDetails(
     if (d.tagline) result.tagline = d.tagline
     if (d.backdrop_path) result.backdropUrl = backdropBase(cfg.imgBase) + d.backdrop_path
     if (Array.isArray(d.genres)) result.genres = d.genres.map((g) => g.name).filter(Boolean)
+    // 电影所属系列（belongs_to_collection）→ 供按媒体信息聚合系列电影为合集
+    if (kind === 'movie' && d.belongs_to_collection) {
+      const bc = d.belongs_to_collection
+      result.collection = {
+        id: bc.id,
+        name: bc.name,
+        posterUrl: bc.poster_path ? cfg.imgBase + bc.poster_path : undefined,
+        backdropUrl: bc.backdrop_path ? backdropBase(cfg.imgBase) + bc.backdrop_path : undefined
+      }
+    }
     const actors: Person[] = (d.credits?.cast ?? []).slice(0, 12).map((c) => ({
       id: String(c.id),
       name: c.name,
@@ -380,6 +399,8 @@ export async function getPersonCredits(personId: string, cfg: TmdbConfig): Promi
         cast: [],
         addedAt: 0,
         posterUrl: c.poster_path ? cfg.imgBase + c.poster_path : undefined,
+        // 带上 TMDB id，供「发现作品」页把已入库的同一作品换成库内真实条目（可点开、有文件信息）
+        tmdbId: c.id,
         scraped: true
       })
       if (works.length >= 40) break

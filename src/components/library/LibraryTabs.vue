@@ -2,7 +2,6 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Layers, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useLibrary } from '@/composables/useLibrary'
-import { wheelToHorizontal } from '@/utils/scroll'
 
 // 媒体库筹码行：全部来自服务器自带分类（useLibrary.libraries）
 const { libraries, activeLibraryId, setActiveLibrary } = useLibrary()
@@ -34,7 +33,7 @@ watch(libraries, () => nextTick(update))
 
 <template>
   <div v-if="libraries.length > 1" class="ltabs-wrap">
-    <div ref="track" class="ltabs no-scrollbar" @scroll="update" @wheel="wheelToHorizontal">
+    <div ref="track" class="ltabs no-scrollbar" @scroll="update">
       <button
         class="ltab"
         :class="{ on: activeLibraryId === 'all' }"

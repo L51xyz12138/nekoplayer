@@ -203,24 +203,25 @@ const continueWatching = computed(() =>
     .sort((a, b) => (b.lastPlayed ?? b.addedAt) - (a.lastPlayed ?? a.addedAt))
 )
 
+// 系列电影合集的成员从浏览区收起（只在合集里出现，避免重复）；搜索仍能搜到
 const recentlyAdded = computed(() =>
   scoped.value
-    .filter((m) => m.type !== 'collection')
+    .filter((m) => m.type !== 'collection' && !m.collectionId)
     .sort((a, b) => b.addedAt - a.addedAt)
     .slice(0, 12)
 )
 
-const movies = computed(() => scoped.value.filter((m) => m.type === 'movie'))
+const movies = computed(() => scoped.value.filter((m) => m.type === 'movie' && !m.collectionId))
 const series = computed(() => scoped.value.filter((m) => m.type === 'series'))
 const collections = computed(() => scoped.value.filter((m) => m.type === 'collection'))
 
-/** 首页 Hero 精选：当前来源里评分最高者（合集不参与） */
-const featured = computed(
-  () =>
-    scoped.value
-      .filter((m) => m.type !== 'collection')
-      .slice()
-      .sort((a, b) => b.rating - a.rating)[0]
+/** 首页 Hero 精选：当前来源里评分最高的几部（合集不参与），首页轮播切换 */
+const featuredList = computed(() =>
+  scoped.value
+    .filter((m) => m.type !== 'collection' && !m.collectionId && (m.backdropUrl || m.posterUrl))
+    .slice()
+    .sort((a, b) => b.rating - a.rating)
+    .slice(0, 6)
 )
 
 function getById(id: string) {
@@ -343,7 +344,7 @@ function applyContinueWatching(
 // ---- 文件源刮削（TMDB）：结果按「文件名派生标题」缓存，命中即复用，未命中不重试 ----
 const SCRAPE_KEY = 'neko-scrape-cache'
 // 刮削结果格式版本：加了演员/类型等字段就 +1，旧缓存作废重刮（否则老条目一直没演员/相关推荐）
-const SCRAPE_VER = '4' // 刮削结果加了 tmdbId（拉分集名用）→ +1 让旧缓存重刮补上
+const SCRAPE_VER = '5' // 刮削结果加了 collection（所属系列，聚合系列电影用）→ +1 让旧缓存重刮补上
 function loadScrapeCache(): Record<string, ScrapeResult | null> {
   try {
     if (pget('neko-scrape-ver') !== SCRAPE_VER) return {} // 版本变了 → 清空重刮
@@ -379,6 +380,11 @@ function applyScrape(item: MediaItem, r: ScrapeResult) {
   if (r.genres?.length) item.genres = r.genres
   if (r.cast?.length) item.cast = r.cast
   if (r.tmdbId) item.tmdbId = r.tmdbId
+  // 所属系列电影（belongs_to_collection）→ 供 regroupTmdbCollections 按此聚合成合集
+  if (r.collection) {
+    item.tmdbCollectionId = r.collection.id
+    item.tmdbCollectionName = r.collection.name
+  }
   item.scraped = true
 }
 
@@ -511,6 +517,7 @@ function reaggregateFiles() {
   const aggregated = aggregateFileItems(lastRawFileItems)
   for (const m of aggregated) applyOverride(m)
   state.items = [...embyItems, ...aggregated]
+  regroupTmdbCollections()
   saveCache(state.items)
   void scrapeFileItems()
 }
@@ -774,7 +781,16 @@ async function loadPersonWorks(sourceId: string, personId: string): Promise<Medi
     apiBase: settings.tmdbApiBase || 'https://api.themoviedb.org/3',
     imgBase: settings.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
   }
-  return getPersonCredits(personId, cfg)
+  const credits = await getPersonCredits(personId, cfg)
+  // 已入库的同一作品（按 tmdbId + 类型匹配）→ 换成库内真实条目（可点开、有 localPath/文件信息）；
+  // 未入库的保留 TMDB 占位（PersonView 里不可点，只展示海报）
+  return credits.map((w) => {
+    if (!w.tmdbId) return w
+    const lib = state.items.find(
+      (m) => m.tmdbId === w.tmdbId && m.type === w.type && !m.id.startsWith('tmdb-person-work:')
+    )
+    return lib || w
+  })
 }
 
 /** 后台刮削文件源条目（仅未命中缓存的走网络），更新条目并写缓存 */
@@ -815,6 +831,7 @@ async function scrapeFileItems() {
   // 限 4 并发，避免打爆 TMDB
   await Promise.all(Array.from({ length: 4 }, worker))
   if (changed) {
+    regroupTmdbCollections() // 刮到「所属系列」后按 TMDB 聚合系列电影为合集（散落目录也能归组）
     saveScrapeCache()
     saveCache(state.items)
   }
@@ -859,7 +876,10 @@ function mapLocalVideo(v: NekoVideoFile, source: MediaSource): MediaItem {
   return item
 }
 
-const isFileItem = (m: MediaItem) => m.id.startsWith('local:') || m.id.startsWith('local-series:')
+const isFileItem = (m: MediaItem) =>
+  m.id.startsWith('local:') ||
+  m.id.startsWith('local-series:') ||
+  m.id.startsWith('local-collection:')
 
 /** 分集文件夹的公共前缀，作为剧集在文件夹视图里的所在文件夹 */
 function commonFolder(folders: string[]): string {
@@ -1057,8 +1077,15 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
       g.length < 5 &&
       (distinctFolders === g.length ||
         (g.every((m) => m.scraped) && new Set(g.map((m) => m.title)).size === g.length))
-    if (g.length < 3 || isCollection) {
+    // 看着像「各自独立的电影」（各占一子文件夹 / 各刮成不同片名）→ 不聚合成剧集，按电影处理。
+    // 系列电影的合集化改由 regroupTmdbCollections 事后按 TMDB belongs_to_collection 归组
+    //（依据媒体信息而非文件夹，故散落在不同目录的系列电影也能聚合，见 issue「指环王」）。
+    if (isCollection && g.length >= 2) {
       out.push(...g)
+      continue
+    }
+    if (g.length < 3) {
+      out.push(...g) // 太少且非系列 → 各是电影
       continue
     }
     const folder = showFolder(g[0].folder ?? '')
@@ -1194,6 +1221,72 @@ async function loadFileSourceItems(): Promise<MediaItem[]> {
   return groups.flat()
 }
 
+/** 按 TMDB「所属系列」(belongs_to_collection) 把文件源系列电影聚合成合集条目。
+ * 依据媒体信息而非文件夹——散落在不同目录的系列电影也能归组（如指环王）。
+ * 刮削完成后调用；幂等，可重复执行（会清理失效合集、重建有效合集）。 */
+function regroupTmdbCollections() {
+  // 1. 收集带「所属系列」的文件源电影，按 源 + 系列 id 分组
+  const groups = new Map<string, MediaItem[]>()
+  for (const m of state.items) {
+    if (m.type !== 'movie' || !m.localPath || !m.tmdbCollectionId) continue
+    const key = m.sourceId + ':' + m.tmdbCollectionId
+    ;(groups.get(key) ?? (groups.set(key, []), groups.get(key)!)).push(m)
+  }
+  // 2. ≥2 部才成合集
+  const validIds = new Set<string>()
+  for (const [key, members] of groups) {
+    if (members.length >= 2) validIds.add('local-collection:' + key)
+  }
+  // 3. 清理失效：不再属于有效合集的电影去掉 collectionId；删掉成员不足的自动合集条目
+  for (const m of state.items) {
+    if (m.collectionId?.startsWith('local-collection:') && !validIds.has(m.collectionId)) {
+      m.collectionId = undefined
+    }
+  }
+  for (let i = state.items.length - 1; i >= 0; i--) {
+    const it = state.items[i]
+    if (it.type === 'collection' && it.id.startsWith('local-collection:') && !validIds.has(it.id)) {
+      state.items.splice(i, 1)
+    }
+  }
+  // 4. 建立/更新有效合集，成员打上 collectionId（从浏览区收起，只在合集里出现）
+  for (const [key, members] of groups) {
+    if (members.length < 2) continue
+    const id = 'local-collection:' + key
+    const sorted = members.slice().sort((a, b) => (a.year || 0) - (b.year || 0))
+    for (const m of sorted) m.collectionId = id
+    const cover = sorted.find((m) => m.posterUrl) ?? sorted[0]
+    const name = sorted.find((m) => m.tmdbCollectionName)?.tmdbCollectionName || cover.title
+    const rating = sorted.reduce((a, m) => Math.max(a, m.rating), 0)
+    const existing = state.items.find((it) => it.id === id)
+    if (existing) {
+      existing.title = name
+      existing.posterUrl = cover.posterUrl
+      existing.backdropUrl = existing.backdropUrl || cover.backdropUrl
+      existing.rating = rating
+    } else {
+      state.items.push({
+        id,
+        sourceId: sorted[0].sourceId,
+        title: name,
+        type: 'collection',
+        year: 0,
+        runtime: 0,
+        rating,
+        certification: '',
+        genres: [],
+        overview: '',
+        cast: [],
+        addedAt: sorted.reduce((a, m) => Math.max(a, m.addedAt), 0),
+        posterUrl: cover.posterUrl,
+        backdropUrl: cover.backdropUrl,
+        libraryId: 'file:other',
+        libraryName: '其他'
+      })
+    }
+  }
+}
+
 /** 后台加载文件源视频并并入库：用最新的 Emby 条目 + 新文件条目，替换掉旧文件条目 */
 async function appendFileSourceItems() {
   try {
@@ -1204,6 +1297,7 @@ async function appendFileSourceItems() {
     const aggregated = aggregateFileItems(fileItems)
     for (const m of aggregated) applyOverride(m)
     state.items = [...embyItems, ...aggregated]
+    regroupTmdbCollections() // 用缓存里的所属系列信息即时聚合系列电影（未刮到的等 scrapeFileItems 补）
     saveCache(state.items)
     // 后台刮削（未命中缓存的走 TMDB），命中后更新卡片为海报/信息
     void scrapeFileItems()
@@ -1382,7 +1476,7 @@ export function useLibrary() {
     movies,
     series,
     collections,
-    featured,
+    featuredList,
     getById,
     toggleFavorite,
     toggleWatched,
@@ -1414,6 +1508,7 @@ export function useLibrary() {
     probeFileEpisode,
     loadEmbyTracks,
     loadEmbyEpisode,
-    loadPersonWorks
+    loadPersonWorks,
+    mergeItems
   }
 }

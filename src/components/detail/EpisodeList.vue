@@ -2,7 +2,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
-import { wheelToHorizontal } from '@/utils/scroll'
 import type { Episode, Season } from '@/types/media'
 
 // 点单集 → 聚焦该集（详情页的简介/文件信息/音轨字幕切成该集）；播放走卡片播放键
@@ -68,7 +67,7 @@ watch(
       </div>
     </div>
 
-    <div ref="track" class="eps__track no-scrollbar" @wheel="wheelToHorizontal">
+    <div ref="track" class="eps__track no-scrollbar">
       <article
         v-for="ep in current.episodes"
         :key="ep.id"

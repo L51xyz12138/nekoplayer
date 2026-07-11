@@ -12,24 +12,35 @@ import type { MediaItem } from '@/types/media'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
-const { getById, toggleFavorite } = useLibrary()
+const { getById, items, toggleFavorite } = useLibrary()
 const player = usePlayer()
 
 const collection = computed(() => getById(props.id))
-const children = ref<MediaItem[]>([])
+// 文件源系列电影合集：成员就在库里，按 collectionId 找（响应式，成员刮到信息会实时联动）
+const isFileCollection = computed(() => props.id.startsWith('local-collection:'))
+const embyChildren = ref<MediaItem[]>([])
+const children = computed(() =>
+  isFileCollection.value
+    ? items.value
+        .filter((m) => m.collectionId === props.id)
+        .slice()
+        .sort((a, b) => (a.year || 0) - (b.year || 0))
+    : embyChildren.value
+)
 const loading = ref(false)
 
 watch(
   () => props.id,
   async () => {
+    if (isFileCollection.value) return // 文件源合集是本地过滤，无需请求
     const col = collection.value
     const s = col && useSources().sessionOf(col.sourceId)
     if (!s) return
     loading.value = true
     try {
-      const items = await getItems(s, { ParentId: props.id, SortBy: 'ProductionYear,SortName' })
+      const list = await getItems(s, { ParentId: props.id, SortBy: 'ProductionYear,SortName' })
       // 优先复用库里已有的响应式条目（收藏/进度可实时联动），没有的再新建
-      children.value = items.map((it) => getById(it.Id) ?? mapEmbyItem(it, s))
+      embyChildren.value = list.map((it) => getById(it.Id) ?? mapEmbyItem(it, s))
     } catch (e) {
       console.warn('[NekoPlayer] 拉取合集内容失败：', e)
     } finally {

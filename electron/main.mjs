@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
-import { spawn } from 'node:child_process'
+import { spawn, execSync } from 'node:child_process'
 import net from 'node:net'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
@@ -99,22 +99,39 @@ function resolveMpv(customPath) {
   return process.platform === 'win32' ? 'mpv.exe' : 'mpv'
 }
 
-// 通过 mpv IPC 跟踪播放位置，退出时把进度回传给 Emby（外部播放器无法自己上报）
-function trackMpvProgress(socketPath, emby) {
+// 通过 mpv IPC：①跟踪播放位置退出时回传 Emby 进度；②文件加载后强制应用详情页预选的音轨/字幕
+// （用户自带 mpv 常有 sub-select/trackselect 脚本在 file-loaded 自动选轨，会盖掉命令行的 --aid/--sid，
+//   故在脚本选完后再经 IPC 设回一次）
+function trackMpvProgress(socketPath, emby, tracks) {
   let lastPos = 0
   let attempts = 0
   const connect = () => {
     const sock = net.connect(socketPath)
     sock.on('connect', () => {
       console.log('[mpv] IPC 已连接')
-      const timer = setInterval(() => {
+      const send = (cmd) => {
         try {
-          sock.write(JSON.stringify({ command: ['get_property', 'time-pos'] }) + '\n')
+          sock.write(JSON.stringify({ command: cmd }) + '\n')
         } catch {
           /* ignore */
         }
-        if (lastPos > 0) reportMpvProgress(emby, lastPos)
-      }, 3000)
+      }
+      const applyTracks = () => {
+        if (!tracks) return
+        if (typeof tracks.aid === 'number') send(['set_property', 'aid', tracks.aid])
+        if (tracks.sid === 'no') send(['set_property', 'sid', 'no'])
+        else if (typeof tracks.sid === 'number') {
+          send(['set_property', 'sid', tracks.sid])
+          send(['set_property', 'sub-visibility', true]) // IPC 用 JSON 布尔（命令行才是 =yes）
+        }
+      }
+      // 仅 Emby 才需要 3s 上报进度
+      const timer = emby
+        ? setInterval(() => {
+            send(['get_property', 'time-pos'])
+            if (lastPos > 0) reportMpvProgress(emby, lastPos)
+          }, 3000)
+        : null
       let buf = ''
       sock.on('data', (chunk) => {
         buf += chunk.toString()
@@ -125,13 +142,19 @@ function trackMpvProgress(socketPath, emby) {
           try {
             const msg = JSON.parse(line)
             if (msg.error === 'success' && typeof msg.data === 'number') lastPos = msg.data
+            // 文件加载完（脚本此时自动选轨）→ 稍后强制设回预选轨道；再补一次防脚本延迟覆盖
+            if (msg.event === 'file-loaded' && tracks) {
+              setTimeout(applyTracks, 400)
+              setTimeout(applyTracks, 1200)
+            }
           } catch {
             /* ignore */
           }
         }
       })
       sock.on('close', () => {
-        clearInterval(timer)
+        if (timer) clearInterval(timer)
+        if (!emby) return
         reportMpvStopped(emby, lastPos)
         // 延迟一下等 Emby 处理完 Stopped，再通知前端刷新，拉到最新进度
         setTimeout(() => {
@@ -281,7 +304,8 @@ ipcMain.handle('play-mpv', (_e, payload) => {
   if (tracks) {
     if (typeof tracks.aid === 'number') args.push(`--aid=${tracks.aid}`)
     if (tracks.sid === 'no') args.push('--sid=no')
-    else if (typeof tracks.sid === 'number') args.push(`--sid=${tracks.sid}`)
+    // 选了具体字幕时同时开字幕显示——有些 mpv 配置默认 sub-visibility=no，只 --sid 选了却不显示
+    else if (typeof tracks.sid === 'number') args.push(`--sid=${tracks.sid}`, '--sub-visibility=yes')
   }
 
   let target
@@ -317,11 +341,9 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     proc.on('exit', () => {
       if (mpvProc === proc) mpvProc = null
     })
-    if (emby) {
-      console.log('[mpv] 启用进度跟踪，socket=', ipcSocket, 'itemId=', emby.itemId)
-      trackMpvProgress(ipcSocket, emby)
-    } else {
-      console.log('[mpv] 未收到 emby 信息，跳过进度跟踪')
+    if (emby || tracks) {
+      // emby → 进度回传；tracks → 文件加载后强制应用预选音轨/字幕（覆盖用户 mpv 的自动选轨脚本）
+      trackMpvProgress(ipcSocket, emby, tracks)
     }
     return true
   } catch (err) {
@@ -344,24 +366,36 @@ function spawnPlayer(bin, args, label) {
   return child
 }
 
-// win32 各外部播放器的可执行文件候选 + 参数
-function winPlayer(player, url, seek) {
-  const map = {
-    potplayer: {
-      name: 'PotPlayer',
-      paths: [
-        'C:/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe',
-        'C:/Program Files (x86)/DAUM/PotPlayer/PotPlayerMini.exe'
-      ],
-      args: seek ? [url, `/seek=${seek}`] : [url]
-    },
-    vlc: {
-      name: 'VLC',
-      paths: ['C:/Program Files/VideoLAN/VLC/vlc.exe', 'C:/Program Files (x86)/VideoLAN/VLC/vlc.exe'],
-      args: seek ? [`--start-time=${seek}`, url] : [url]
+// 找 Windows 上的 VLC：标准安装位置找不到就查注册表 InstallDir（用户装到别处也能找到）
+function findWinVlc() {
+  const std = [
+    'C:/Program Files/VideoLAN/VLC/vlc.exe',
+    'C:/Program Files (x86)/VideoLAN/VLC/vlc.exe'
+  ]
+  for (const p of std) if (existsSync(p)) return p
+  for (const root of ['HKLM', 'HKCU']) {
+    for (const key of ['SOFTWARE\\VideoLAN\\VLC', 'SOFTWARE\\WOW6432Node\\VideoLAN\\VLC']) {
+      try {
+        const out = execSync(`reg query "${root}\\${key}" /v InstallDir`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore']
+        })
+        const m = out.match(/InstallDir\s+REG_SZ\s+(.+)/)
+        if (m) {
+          const exe = path.join(m[1].trim(), 'vlc.exe')
+          if (existsSync(exe)) return exe
+        }
+      } catch {
+        /* 该注册表项不存在 */
+      }
     }
   }
-  return map[player]
+  return null
+}
+// VLC 窗口大小交给 VLC 自己（单窗口，贴合视频原分辨率/记忆尺寸）——CLI 的 --width/--height 只在
+// 「视频独立成单独窗口(--no-embedded-video)」时才生效，会多弹一个控制窗口，权衡后不强制尺寸。
+function linuxVlcArgs(url, seek) {
+  return [...(seek ? [`--start-time=${seek}`] : []), url]
 }
 
 // 唤起系统外部播放器（各平台，支持自定义程序路径）
@@ -385,23 +419,40 @@ function openExternal(player, url, customPath, startSec) {
       spawn('open', ['-a', appMap[player] || player, url], { stdio: 'ignore' })
       return true
     }
-    if (process.platform === 'win32' && (player === 'potplayer' || player === 'vlc')) {
-      const cfg = winPlayer(player, url, seek)
-      const bin = [customPath, ...cfg.paths].filter(Boolean).find((p) => existsSync(p))
+    if (process.platform === 'win32' && player === 'vlc') {
+      const bin = (customPath && existsSync(customPath) && customPath) || findWinVlc()
       if (!bin) {
-        // 标准安装位置和自定义路径都没找到 → 明确告知而非报晦涩错误
         dialog.showErrorBox(
-          '未找到播放器',
-          `未找到 ${cfg.name}。\n请先安装 ${cfg.name}，或在「设置 → 播放器路径」里填写它的 exe 路径。`
+          '未找到 VLC',
+          '未找到 VLC。\n请先安装 VLC，或在「设置 → 播放器路径」里填写它的 vlc.exe 路径。'
         )
         return false
       }
-      spawnPlayer(bin, cfg.args, cfg.name)
+      // 续播 --start-time（窗口大小交给 VLC 自己，单窗口）
+      const args = [...(seek ? [`--start-time=${seek}`] : []), url]
+      spawnPlayer(bin, args, 'VLC')
+      return true
+    }
+    if (process.platform === 'win32' && player === 'potplayer') {
+      const paths = [
+        customPath,
+        'C:/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe',
+        'C:/Program Files (x86)/DAUM/PotPlayer/PotPlayerMini.exe'
+      ]
+      const bin = paths.filter(Boolean).find((p) => existsSync(p))
+      if (!bin) {
+        dialog.showErrorBox(
+          '未找到 PotPlayer',
+          '未找到 PotPlayer。\n请先安装，或在「设置 → 播放器路径」里填写它的 exe 路径。'
+        )
+        return false
+      }
+      spawnPlayer(bin, seek ? [url, `/seek=${seek}`] : [url], 'PotPlayer')
       return true
     }
     if (process.platform === 'linux' && player === 'vlc') {
       const bin = customPath && existsSync(customPath) ? customPath : 'vlc'
-      spawnPlayer(bin, seek ? [`--start-time=${seek}`, url] : [url], 'VLC')
+      spawnPlayer(bin, linuxVlcArgs(url, seek), 'VLC')
       return true
     }
     // 兜底：交给系统默认程序打开

@@ -2,7 +2,6 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
-import { wheelToHorizontal } from '@/utils/scroll'
 import type { Person } from '@/types/media'
 
 const props = defineProps<{ title: string; people: Person[] }>()
@@ -45,7 +44,7 @@ watch(() => props.people, () => nextTick(update))
         </button>
       </div>
     </div>
-    <div ref="track" class="cast__track no-scrollbar" @wheel="wheelToHorizontal" @scroll="update">
+    <div ref="track" class="cast__track no-scrollbar" @scroll="update">
       <button v-for="p in people" :key="p.id" class="person" :title="`${p.name} · 查看作品`" @click="emit('select', p)">
         <div class="person__avatar">
           <PosterImage :seed="p.name" :title="p.name" :src="p.avatarUrl" kind="avatar" />

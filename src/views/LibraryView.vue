@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { FolderTree, LayoutGrid } from 'lucide-vue-next'
 import TopBar from '@/components/layout/TopBar.vue'
@@ -36,7 +36,7 @@ const {
   movies,
   series,
   collections,
-  featured,
+  featuredList,
   loading,
   error,
   activeSourceId,
@@ -49,12 +49,33 @@ const {
   setSort
 } = useLibrary()
 
-// 文件源「库视图」用的网格：当前源全部条目按标题排序
+// 文件源「库视图」用的网格：当前源全部条目按标题排序（系列电影成员收进合集卡、不单列）
 const fileGridItems = computed(() =>
-  [...bySource.value].sort((a, b) => a.title.localeCompare(b.title, 'zh'))
+  [...bySource.value]
+    .filter((m) => !m.collectionId)
+    .sort((a, b) => a.title.localeCompare(b.title, 'zh'))
 )
 
 const player = usePlayer()
+
+// 首页精选轮播：多部循环切换，7s 自动切；切源/列表变化时重置
+const heroIndex = ref(0)
+const heroItem = computed(() => featuredList.value[heroIndex.value] ?? featuredList.value[0])
+let heroTimer: ReturnType<typeof setInterval> | undefined
+function startHeroRotate() {
+  clearInterval(heroTimer)
+  heroTimer = setInterval(() => {
+    const n = featuredList.value.length
+    if (n > 1) heroIndex.value = (heroIndex.value + 1) % n
+  }, 7000)
+}
+function goHero(i: number) {
+  heroIndex.value = i
+  startHeroRotate() // 手动切后重置计时
+}
+watch(featuredList, () => (heroIndex.value = 0))
+startHeroRotate()
+onBeforeUnmount(() => clearInterval(heroTimer))
 
 // 当前选中的是「文件浏览类源」（本机/WebDAV/SMB/DLNA）→ 默认视图走文件夹层级浏览
 const FILE_KINDS = ['local', 'webdav', 'smb', 'dlna']
@@ -162,8 +183,20 @@ function play(item: MediaItem) {
         </div>
 
         <template v-else-if="browseMode">
-          <div v-if="featured" class="library__hero">
-            <HeroBanner :item="featured" @play="play" />
+          <div v-if="heroItem" class="library__hero">
+            <transition name="fade" mode="out-in">
+              <HeroBanner :key="heroItem.id" :item="heroItem" @play="play" />
+            </transition>
+            <div v-if="featuredList.length > 1" class="library__hero-dots">
+              <button
+                v-for="(f, i) in featuredList"
+                :key="f.id"
+                class="library__hero-dot"
+                :class="{ on: i === heroIndex }"
+                :title="f.title"
+                @click="goHero(i)"
+              />
+            </div>
           </div>
 
           <div class="library__body">
@@ -221,7 +254,31 @@ function play(item: MediaItem) {
   padding-bottom: 44px;
 }
 .library__hero {
+  position: relative;
   padding: 6px 34px 0;
+}
+.library__hero-dots {
+  position: absolute;
+  bottom: 22px;
+  right: 52px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+}
+.library__hero-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.library__hero-dot:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+.library__hero-dot.on {
+  width: 22px;
+  border-radius: var(--r-pill);
+  background: #fff;
 }
 .library__body {
   padding: 0 34px;

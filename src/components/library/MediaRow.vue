@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { wheelToHorizontal } from '@/utils/scroll'
 
 withDefaults(defineProps<{ title: string; itemWidth?: string }>(), {
   itemWidth: '158px'
@@ -33,7 +32,6 @@ function scroll(dir: number) {
       ref="track"
       class="row__track no-scrollbar"
       :style="{ '--col': itemWidth }"
-      @wheel="wheelToHorizontal"
     >
       <slot />
     </div>

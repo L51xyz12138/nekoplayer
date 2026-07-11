@@ -3,7 +3,7 @@ import { type Component, nextTick, onBeforeUnmount, onMounted, ref, watch } from
 import { Layers, Server, HardDrive, Cloud, Network, Cast, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
-import { wheelToHorizontal } from '@/utils/scroll'
+import { sourceKindMeta } from '@/data/sourceKinds'
 import type { SourceKind } from '@/types/source'
 
 // 只显示启用的源（停用的不进媒体库、也不占标签位）
@@ -18,6 +18,13 @@ const kindIcon: Partial<Record<SourceKind, Component>> = {
 }
 function iconFor(kind: SourceKind): Component {
   return kindIcon[kind] ?? Server
+}
+// 各源类型的主题色（Emby 绿 / Jellyfin 紫 / 本机 / WebDAV 蓝 …），用于区分类型
+function accentFor(kind: SourceKind): string {
+  return sourceKindMeta(kind).accent
+}
+function labelFor(kind: SourceKind): string {
+  return sourceKindMeta(kind).label
 }
 
 // 溢出时显示左右滚动按钮（桌面鼠标无法横向滚动，与「媒体库」筹码行一致）
@@ -46,7 +53,7 @@ watch(enabledSources, () => nextTick(update))
 
 <template>
   <div class="stabs-wrap">
-    <div ref="track" class="stabs no-scrollbar" @scroll="update" @wheel="wheelToHorizontal">
+    <div ref="track" class="stabs no-scrollbar" @scroll="update">
       <button class="stab" :class="{ on: activeSourceId === 'all' }" @click="setActiveSource('all')">
         <Layers :size="16" />
         全部资料库
@@ -58,8 +65,21 @@ watch(enabledSources, () => nextTick(update))
         :class="{ on: activeSourceId === s.id }"
         @click="setActiveSource(s.id)"
       >
-        <component :is="iconFor(s.kind)" :size="16" />
+        <component
+          :is="iconFor(s.kind)"
+          :size="16"
+          :style="activeSourceId === s.id ? undefined : { color: accentFor(s.kind) }"
+        />
         {{ s.name }}
+        <span
+          class="stab__kind"
+          :style="
+            activeSourceId === s.id
+              ? undefined
+              : { color: accentFor(s.kind), background: accentFor(s.kind) + '22' }
+          "
+          >{{ labelFor(s.kind) }}</span
+        >
       </button>
     </div>
 
@@ -115,6 +135,17 @@ watch(enabledSources, () => nextTick(update))
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent;
   box-shadow: 0 8px 20px var(--accent-glow);
+}
+.stab__kind {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+}
+.stab.on .stab__kind {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .stabs-nav-group {

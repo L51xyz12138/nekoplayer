@@ -111,6 +111,12 @@ export interface MediaItem {
   scraped?: boolean
   /** TMDB 条目 id（文件源剧集用它拉每季分集的真实集名/简介/剧照） */
   tmdbId?: number
+  /** 所属系列电影合集的 id（文件源系列电影，如指环王三部曲）；有则从浏览区收起、只在合集里出现 */
+  collectionId?: string
+  /** 所属 TMDB 系列 id（belongs_to_collection）——按媒体信息把散落的系列电影聚合成合集，不依赖文件夹 */
+  tmdbCollectionId?: number
+  /** 所属 TMDB 系列名（如「指环王（系列）」），作合集标题 */
+  tmdbCollectionName?: string
   /** 文件源剧集分集信息（从文件名解析）；有则该文件是某剧的一集，会被聚合成剧集 */
   episodeInfo?: { show: string; season: number; episode: number; epTitle: string }
   /** 音轨/字幕轨道（文件源用 mpv 探测得到，供详情页预选）；剧集取代表集 */
