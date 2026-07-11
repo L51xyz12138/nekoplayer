@@ -31,8 +31,14 @@ export interface NekoNative {
     emby?: NekoEmbyProgress,
     tracks?: { aid?: number; sid?: number | 'no' }
   ): Promise<boolean>
-  /** 唤起系统外部播放器（iina/vlc/potplayer） */
-  playExternal(player: string, url: string, appPath?: string, startSec?: number): Promise<boolean>
+  /** 唤起系统外部播放器（iina/vlc/potplayer），可预选音轨/字幕（IINA/VLC 生效，PotPlayer 用自身菜单） */
+  playExternal(
+    player: string,
+    url: string,
+    appPath?: string,
+    startSec?: number,
+    tracks?: { aid?: number; sid?: number | 'no' }
+  ): Promise<boolean>
   /** 外部播放结束后主进程回调（带刚播放的 itemId），前端据此轻量刷新进度 */
   onPlaybackEnded(cb: (itemId?: string) => void): void
   /** 读持久化存储（同步，供模块初始化时用）；无值返回 null */

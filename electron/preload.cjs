@@ -7,9 +7,9 @@ contextBridge.exposeInMainWorld('nekoNative', {
   // mpv 本地解码播放（items + 起始索引 + 自定义 mpv 路径），支持整季播放列表
   playMpv: (items, title, startIndex, mpvPath, startSec, emby, tracks) =>
     ipcRenderer.invoke('play-mpv', { items, title, startIndex, mpvPath, startSec, emby, tracks }),
-  // 唤起系统外部播放器（iina / vlc / potplayer），支持自定义程序路径 + 起始秒数
-  playExternal: (player, url, appPath, startSec) =>
-    ipcRenderer.invoke('play-external', { player, url, appPath, startSec }),
+  // 唤起系统外部播放器（iina / vlc / potplayer），支持自定义程序路径 + 起始秒数 + 预选音轨/字幕
+  playExternal: (player, url, appPath, startSec, tracks) =>
+    ipcRenderer.invoke('play-external', { player, url, appPath, startSec, tracks }),
   // 外部播放结束后主进程通知，前端据此刷新进度
   onPlaybackEnded: (cb) => ipcRenderer.on('playback-ended', (_e, itemId) => cb(itemId)),
   // 持久化存储（写到 userData 下的 json 文件，跨软件更新不丢；读同步、写异步）

@@ -97,6 +97,7 @@ const subSel = computed<string>({
         </div>
       </label>
     </div>
+    <p class="tracks__note">预选仅对 mpv / VLC / IINA 生效；PotPlayer / Infuse 请在其播放器内切换轨道</p>
   </section>
 </template>
 
@@ -113,6 +114,11 @@ const subSel = computed<string>({
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 14px;
+}
+.tracks__note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-mute);
 }
 .field {
   display: flex;

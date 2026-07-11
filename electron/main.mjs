@@ -394,29 +394,57 @@ function findWinVlc() {
 }
 // VLC 窗口大小交给 VLC 自己（单窗口，贴合视频原分辨率/记忆尺寸）——CLI 的 --width/--height 只在
 // 「视频独立成单独窗口(--no-embedded-video)」时才生效，会多弹一个控制窗口，权衡后不强制尺寸。
-function linuxVlcArgs(url, seek) {
-  return [...(seek ? [`--start-time=${seek}`] : []), url]
+function linuxVlcArgs(url, seek, trackArgs = []) {
+  return [...trackArgs, ...(seek ? [`--start-time=${seek}`] : []), url]
 }
 
-// 唤起系统外部播放器（各平台，支持自定义程序路径）
-function openExternal(player, url, customPath, startSec) {
+// 把详情页预选的 mpv 轨道号（1-based，音轨/字幕各自计数）转成各外部播放器的命令行参数。
+// tracks = { aid?:number, sid?:number|'no' }（与传 mpv 的同构）。
+// IINA 基于 mpv → 直接透传 `--mpv-aid/sid`（号一致）；VLC 的 `--audio-track/--sub-track` 是「该类型内
+// 0-based 序号」故减 1（`--no-spu` 关字幕）；PotPlayer/Infuse 无可靠的命令行选轨 → 不传（用其自身菜单切）。
+function externalTrackArgs(player, tracks) {
+  if (!tracks) return []
+  const { aid, sid } = tracks
+  const out = []
+  if (player === 'iina') {
+    if (typeof aid === 'number') out.push(`--mpv-aid=${aid}`)
+    if (sid === 'no') out.push('--mpv-sid=no')
+    else if (typeof sid === 'number') out.push(`--mpv-sid=${sid}`, '--mpv-sub-visibility=yes')
+  } else if (player === 'vlc') {
+    if (typeof aid === 'number') out.push(`--audio-track=${aid - 1}`)
+    if (sid === 'no') out.push('--no-spu')
+    else if (typeof sid === 'number') out.push(`--sub-track=${sid - 1}`)
+  }
+  return out
+}
+
+// 唤起系统外部播放器（各平台，支持自定义程序路径 + 详情页预选音轨/字幕）
+function openExternal(player, url, customPath, startSec, tracks) {
   const seek = typeof startSec === 'number' && startSec > 0 ? startSec : 0
+  const trackArgs = externalTrackArgs(player, tracks)
   try {
     if (process.platform === 'darwin') {
       const appMap = { iina: 'IINA', vlc: 'VLC', infuse: 'Infuse' }
-      if (customPath) {
-        // IINA：用 .app 内的 iina-cli 精确调用（可传 --mpv-start 续播），绕过 LaunchServices
-        if (player === 'iina') {
-          const cli = path.join(customPath, 'Contents/MacOS/iina-cli')
-          if (existsSync(cli)) {
-            spawnPlayer(cli, seek ? [`--mpv-start=${seek}`, url] : [url], 'IINA')
-            return true
-          }
+      // IINA：用 .app 内的 iina-cli 精确调用（才能传 --mpv-start 续播 + --mpv-aid/sid 预选轨道；open -a 传不了）
+      if (player === 'iina') {
+        const cli = customPath
+          ? path.join(customPath, 'Contents/MacOS/iina-cli')
+          : '/Applications/IINA.app/Contents/MacOS/iina-cli'
+        if (existsSync(cli)) {
+          spawnPlayer(cli, [...(seek ? [`--mpv-start=${seek}`] : []), ...trackArgs, url], 'IINA')
+          return true
         }
-        spawn('open', ['-a', customPath, url], { stdio: 'ignore' })
+        spawn('open', ['-a', customPath || 'IINA', url], { stdio: 'ignore' })
         return true
       }
-      spawn('open', ['-a', appMap[player] || player, url], { stdio: 'ignore' })
+      const appName = customPath || appMap[player] || player
+      // VLC 支持命令行轨道/续播 → 经 open --args 透传给 VLC.app（有可传的才用 --args）
+      if (player === 'vlc' && (trackArgs.length || seek)) {
+        const extra = [...trackArgs, ...(seek ? [`--start-time=${seek}`] : [])]
+        spawn('open', ['-a', appName, '--args', ...extra, url], { stdio: 'ignore' })
+        return true
+      }
+      spawn('open', ['-a', appName, url], { stdio: 'ignore' })
       return true
     }
     if (process.platform === 'win32' && player === 'vlc') {
@@ -428,8 +456,8 @@ function openExternal(player, url, customPath, startSec) {
         )
         return false
       }
-      // 续播 --start-time（窗口大小交给 VLC 自己，单窗口）
-      const args = [...(seek ? [`--start-time=${seek}`] : []), url]
+      // 预选轨道 + 续播 --start-time（窗口大小交给 VLC 自己，单窗口）
+      const args = [...trackArgs, ...(seek ? [`--start-time=${seek}`] : []), url]
       spawnPlayer(bin, args, 'VLC')
       return true
     }
@@ -447,12 +475,13 @@ function openExternal(player, url, customPath, startSec) {
         )
         return false
       }
+      // PotPlayer 无可靠的命令行轨道选择 → 只续播，轨道用其自身菜单/快捷键切
       spawnPlayer(bin, seek ? [url, `/seek=${seek}`] : [url], 'PotPlayer')
       return true
     }
     if (process.platform === 'linux' && player === 'vlc') {
       const bin = customPath && existsSync(customPath) ? customPath : 'vlc'
-      spawnPlayer(bin, linuxVlcArgs(url, seek), 'VLC')
+      spawnPlayer(bin, linuxVlcArgs(url, seek, trackArgs), 'VLC')
       return true
     }
     // 兜底：交给系统默认程序打开
@@ -467,9 +496,9 @@ function openExternal(player, url, customPath, startSec) {
 }
 
 ipcMain.handle('play-external', (_e, payload) => {
-  const { player, url, appPath, startSec } = payload || {}
+  const { player, url, appPath, startSec, tracks } = payload || {}
   if (!url) return false
-  return openExternal(player, url, appPath, startSec)
+  return openExternal(player, url, appPath, startSec, tracks)
 })
 
 // 选择文件夹（添加本机存储源时用）

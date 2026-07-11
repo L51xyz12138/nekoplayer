@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { Play } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
 import type { MediaItem } from '@/types/media'
 
 const props = defineProps<{ item: MediaItem }>()
 const emit = defineEmits<{ play: [item: MediaItem] }>()
+
+const router = useRouter()
+// 点卡片进详情页（文件源 id 含斜杠/冒号，用具名路由让 vue-router 正确编码）；播放走播放键/空格
+function open() {
+  router.push({ name: 'detail', params: { id: props.item.id } })
+}
 
 // 剧集用 NextUp 的下一集信息；电影用自身进度
 const nextUp = computed(() => props.item.nextUp)
@@ -24,14 +31,14 @@ const info = computed(() =>
     class="cc"
     tabindex="0"
     data-nav-card
-    @click="emit('play', item)"
-    @keydown.enter="emit('play', item)"
+    @click="open"
+    @keydown.enter="open"
     @keydown.space.prevent="emit('play', item)"
   >
     <div class="cc__thumb">
       <PosterImage :seed="nextUp?.episodeId ?? item.id" :src="still" kind="backdrop" />
       <div class="cc__scrim" />
-      <button class="cc__play" title="继续播放">
+      <button class="cc__play" title="继续播放" @click.stop="emit('play', item)">
         <Play :size="22" fill="currentColor" />
       </button>
       <div v-if="progress > 0" class="cc__bar">

@@ -120,7 +120,7 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string,
         )
       } else if (native.playExternal) {
         const key = player.toLowerCase()
-        native.playExternal(key, playItems[startAt].url, settings.playerPaths[key] || '', startSec)
+        native.playExternal(key, playItems[startAt].url, settings.playerPaths[key] || '', startSec, tracks)
       }
       reportPlaybackStart(s, playItemId, psid).catch(() => {})
     })
@@ -137,7 +137,7 @@ function playFile(filePath: string, title: string, player?: string, tracks?: Pla
     native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0, undefined, tracks)
   } else if (native.playExternal) {
     const key = player.toLowerCase()
-    native.playExternal(key, filePath, settings.playerPaths[key] || '', 0)
+    native.playExternal(key, filePath, settings.playerPaths[key] || '', 0, tracks)
   }
 }
 
