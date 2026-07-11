@@ -22,6 +22,22 @@ export interface ScrapeResult {
   cast: Person[]
 }
 
+/** 「重新匹配」时的候选项（多个匹配让用户选） */
+export interface TmdbCandidate {
+  id: number
+  mediaType: 'movie' | 'tv'
+  title: string
+  year: number
+  posterUrl?: string
+  rating: number
+  overview: string
+}
+
+/** 海报用 w500 够了，但背景图铺满详情页需要更高分辨率 → 把尺寸段换成 w1280，避免模糊 */
+function backdropBase(imgBase: string): string {
+  return imgBase.replace(/w\d+(\/?)$/, 'w1280$1')
+}
+
 const VIDEO_EXT_RE =
   /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m2ts|mpg|mpeg|rmvb|rm|3gp|vob|ogv|divx|f4v|mts)$/i
 // 出现即认为其后是画质/发布信息，标题取其之前
@@ -154,44 +170,136 @@ export async function scrapeMedia(
   }
 
   // 拉详情 + 演职人员，丰富详情页（类型标签 / 背景图 / 演员 / 导演 / 相关推荐靠类型匹配）
-  if (hit.id) {
-    try {
-      const dq = new URLSearchParams({
-        api_key: cfg.key,
-        language: cfg.lang,
-        append_to_response: 'credits'
-      })
-      const dres = await fetch(`${cfg.apiBase}/${kind}/${hit.id}?${dq}`)
-      if (dres.ok) {
-        const d = (await dres.json()) as TmdbDetails
-        if (d.tagline) result.tagline = d.tagline
-        if (d.backdrop_path) result.backdropUrl = cfg.imgBase + d.backdrop_path
-        if (Array.isArray(d.genres)) result.genres = d.genres.map((g) => g.name).filter(Boolean)
-        const actors: Person[] = (d.credits?.cast ?? []).slice(0, 12).map((c) => ({
-          id: String(c.id),
-          name: c.name,
-          role: c.character || '',
-          kind: 'actor',
-          avatarUrl: c.profile_path ? cfg.imgBase + c.profile_path : undefined
-        }))
-        const dir = (d.credits?.crew ?? []).find((c) => c.job === 'Director')
-        result.cast = dir
-          ? [
-              {
-                id: String(dir.id),
-                name: dir.name,
-                role: '导演',
-                kind: 'director',
-                avatarUrl: dir.profile_path ? cfg.imgBase + dir.profile_path : undefined
-              },
-              ...actors
-            ]
-          : actors
-      }
-    } catch {
-      /* 详情失败不影响基础结果 */
-    }
+  if (hit.id) await enrichFromDetails(cfg, kind, hit.id, result)
+  return result
+}
+
+/** 拉某条 TMDB 详情 + 演职人员，填进 result（tagline/背景图/类型/演员/导演）。搜索与重新匹配共用。 */
+async function enrichFromDetails(
+  cfg: TmdbConfig,
+  kind: 'movie' | 'tv',
+  id: number,
+  result: ScrapeResult
+): Promise<void> {
+  try {
+    const dq = new URLSearchParams({ api_key: cfg.key, language: cfg.lang, append_to_response: 'credits' })
+    const dres = await fetch(`${cfg.apiBase}/${kind}/${id}?${dq}`)
+    if (!dres.ok) return
+    const d = (await dres.json()) as TmdbDetails
+    if (d.tagline) result.tagline = d.tagline
+    if (d.backdrop_path) result.backdropUrl = backdropBase(cfg.imgBase) + d.backdrop_path
+    if (Array.isArray(d.genres)) result.genres = d.genres.map((g) => g.name).filter(Boolean)
+    const actors: Person[] = (d.credits?.cast ?? []).slice(0, 12).map((c) => ({
+      id: String(c.id),
+      name: c.name,
+      role: c.character || '',
+      kind: 'actor',
+      avatarUrl: c.profile_path ? cfg.imgBase + c.profile_path : undefined
+    }))
+    const dir = (d.credits?.crew ?? []).find((c) => c.job === 'Director')
+    result.cast = dir
+      ? [
+          {
+            id: String(dir.id),
+            name: dir.name,
+            role: '导演',
+            kind: 'director',
+            avatarUrl: dir.profile_path ? cfg.imgBase + dir.profile_path : undefined
+          },
+          ...actors
+        ]
+      : actors
+  } catch {
+    /* 详情失败不影响基础结果 */
   }
+}
+
+/** 按名字搜 TMDB，返回多个候选（供「重新匹配」里手动选正确的那个）。 */
+export async function searchTmdb(
+  cfg: TmdbConfig,
+  query: string,
+  isTv: boolean
+): Promise<TmdbCandidate[]> {
+  if (!cfg.key || !query.trim()) return []
+  const path = isTv ? '/search/tv' : '/search/multi'
+  const q = new URLSearchParams({ api_key: cfg.key, language: cfg.lang, query, include_adult: 'false' })
+  try {
+    const res = await fetch(`${cfg.apiBase}${path}?${q}`)
+    if (!res.ok) return []
+    const data = (await res.json()) as { results?: TmdbItem[] }
+    return (data.results ?? [])
+      .filter(
+        (r) => (r.media_type ? r.media_type === 'movie' || r.media_type === 'tv' : true) && !!(r.title || r.name)
+      )
+      .slice(0, 8)
+      .map((r) => {
+        const mt: 'movie' | 'tv' = isTv || r.media_type === 'tv' || (!!r.name && !r.title) ? 'tv' : 'movie'
+        const date = r.release_date || r.first_air_date || ''
+        return {
+          id: r.id!,
+          mediaType: mt,
+          title: r.title || r.name || query,
+          year: date ? parseInt(date.slice(0, 4), 10) || 0 : 0,
+          posterUrl: r.poster_path ? cfg.imgBase + r.poster_path : undefined,
+          rating: r.vote_average ? Math.round(r.vote_average * 10) / 10 : 0,
+          overview: r.overview || ''
+        }
+      })
+  } catch {
+    return []
+  }
+}
+
+/** 剧集的某一季（选季用） */
+export interface TmdbSeason {
+  seasonNumber: number
+  name: string
+  posterUrl?: string
+  overview: string
+  year: number
+  episodeCount: number
+}
+
+/** 取某剧集的季列表（编辑元数据时多季可选）。只返回正片季（排除 season 0 特别篇）。 */
+export async function getTvSeasons(cfg: TmdbConfig, tvId: number): Promise<TmdbSeason[]> {
+  try {
+    const q = new URLSearchParams({ api_key: cfg.key, language: cfg.lang })
+    const d = await fetch(`${cfg.apiBase}/tv/${tvId}?${q}`).then((r) => r.json())
+    return (d.seasons ?? [])
+      .filter((s: { season_number?: number }) => (s.season_number ?? 0) >= 1)
+      .map((s: {
+        season_number: number
+        name?: string
+        poster_path?: string | null
+        overview?: string
+        air_date?: string
+        episode_count?: number
+      }) => ({
+        seasonNumber: s.season_number,
+        name: s.name || `第 ${s.season_number} 季`,
+        posterUrl: s.poster_path ? cfg.imgBase + s.poster_path : undefined,
+        overview: s.overview || '',
+        year: s.air_date ? parseInt(s.air_date.slice(0, 4), 10) || 0 : 0,
+        episodeCount: s.episode_count || 0
+      }))
+  } catch {
+    return []
+  }
+}
+
+/** 按选中的候选项拉完整元数据（含详情 + 演职人员）。 */
+export async function scrapeById(cfg: TmdbConfig, cand: TmdbCandidate): Promise<ScrapeResult> {
+  const result: ScrapeResult = {
+    type: cand.mediaType === 'tv' ? 'series' : 'movie',
+    title: cand.title,
+    year: cand.year,
+    posterUrl: cand.posterUrl,
+    rating: cand.rating,
+    overview: cand.overview,
+    genres: [],
+    cast: []
+  }
+  await enrichFromDetails(cfg, cand.mediaType, cand.id, result)
   return result
 }
 

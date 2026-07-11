@@ -2,10 +2,12 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
+import { wheelToHorizontal } from '@/utils/scroll'
 import type { Episode, Season } from '@/types/media'
 
-const props = defineProps<{ seasons: Season[]; resumeId?: string }>()
-const emit = defineEmits<{ play: [ep: Episode] }>()
+// 点单集 → 聚焦该集（详情页的简介/文件信息/音轨字幕切成该集）；播放走卡片播放键
+const props = defineProps<{ seasons: Season[]; resumeId?: string; selectedId?: string }>()
+const emit = defineEmits<{ play: [ep: Episode]; select: [ep: Episode] }>()
 
 const active = ref(props.seasons[0]?.season ?? 1)
 const current = computed(
@@ -58,6 +60,7 @@ watch(
             {{ s.title }}
           </button>
         </div>
+        <span v-else-if="current" class="eps__single">{{ current.title }}</span>
         <div class="eps__nav">
           <button class="eps__btn" title="向左" @click="scroll(-1)"><ChevronLeft :size="18" /></button>
           <button class="eps__btn" title="向右" @click="scroll(1)"><ChevronRight :size="18" /></button>
@@ -65,24 +68,26 @@ watch(
       </div>
     </div>
 
-    <div ref="track" class="eps__track no-scrollbar">
+    <div ref="track" class="eps__track no-scrollbar" @wheel="wheelToHorizontal">
       <article
         v-for="ep in current.episodes"
         :key="ep.id"
         class="ep"
-        :class="{ resuming: ep.id === resumeId }"
+        :class="{ resuming: ep.id === resumeId, 'is-selected': ep.id === selectedId }"
         :data-ep-id="ep.id"
         :title="ep.localPath"
         tabindex="0"
         data-nav-card
-        @click="emit('play', ep)"
-        @keydown.enter="emit('play', ep)"
+        @click="emit('select', ep)"
+        @keydown.enter="emit('select', ep)"
         @keydown.space.prevent="emit('play', ep)"
       >
         <div class="ep__thumb">
           <PosterImage :seed="ep.stillSeed" :src="ep.stillUrl" :local-path="ep.localPath" kind="still" />
           <div class="ep__scrim" />
-          <button class="ep__play"><Play :size="18" fill="currentColor" /></button>
+          <button class="ep__play" title="播放本集" @click.stop="emit('play', ep)">
+            <Play :size="18" fill="currentColor" />
+          </button>
           <span v-if="ep.id === resumeId" class="ep__badge ep__badge--resume">续看</span>
           <span v-else class="ep__badge">第 {{ ep.episode }} 集</span>
           <span v-if="ep.runtime" class="ep__dur">{{ ep.runtime }} 分钟</span>
@@ -96,6 +101,7 @@ watch(
     </div>
   </section>
 </template>
+
 
 <style scoped>
 .eps {
@@ -136,6 +142,15 @@ watch(
 .stab.on {
   color: #fff;
   background: var(--surface-hover);
+}
+.eps__single {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
 }
 .eps__nav {
   display: flex;
@@ -195,8 +210,8 @@ watch(
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
 }
-/* 续看集：常驻强调色描边 */
-.ep.resuming .ep__thumb {
+/* 当前聚焦的那一集：常驻强调色描边 */
+.ep.is-selected .ep__thumb {
   box-shadow: 0 0 0 2px var(--accent);
 }
 .ep__badge--resume {

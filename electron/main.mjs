@@ -249,21 +249,32 @@ ipcMain.handle('play-mpv', (_e, payload) => {
       : process.platform === 'win32'
         ? 'd3d11va'
         : 'auto-safe'
-  const args = [
-    `--title=${title || 'NekoPlayer'}`,
-    // immediate：mpv 一启动就立刻建窗（不必等打开文件/连上网络流），网络流下「窗口迟迟不弹」明显改善
-    '--force-window=immediate',
-    '--keep-open=no',
-    `--hwdec=${hwdec}`,
-    '--autofit-larger=90%x90%',
-    '--geometry=50%:50%',
-    `--config-dir=${MPV_CONFIG_DIR}`,
-    `--input-ipc-server=${ipcSocket}`,
-    // macOS 显示原生标题栏（红绿灯在左上角）；mpv.conf 的 border=no 只适合 win/linux 的 uosc 无边框风格
-    ...(process.platform === 'darwin' ? ['--border=yes'] : []),
-    // 音轨/字幕/跳章节等按设置（放在默认项之后，同名参数后者覆盖）
-    ...mpvSettingArgs()
-  ]
+  // 用户指定了自己的 mpv（存在）→ **完全尊重他自己的配置**（uosc/界面/滤镜/硬解/窗口都由他的 config 决定），
+  // 只塞软件必需的参数（进度同步 socket、放完自动关窗、续播、预选轨道），不覆盖他的播放界面。
+  // 只有用软件自带的 mpv 时才给全套默认（自带 uosc 配置 + 平台硬解 + 立即建窗 + 窗口大小）。
+  const customMpv = !!(mpvPath && existsSync(mpvPath))
+  const args = customMpv
+    ? [
+        `--title=${title || 'NekoPlayer'}`,
+        '--keep-open=no', // 放完自动关窗——软件靠 mpv 退出来回传进度/刷新，必须保留
+        `--input-ipc-server=${ipcSocket}`,
+        ...mpvSettingArgs()
+      ]
+    : [
+        `--title=${title || 'NekoPlayer'}`,
+        // immediate：mpv 一启动就立刻建窗（不必等打开文件/连上网络流），网络流下「窗口迟迟不弹」明显改善
+        '--force-window=immediate',
+        '--keep-open=no',
+        `--hwdec=${hwdec}`,
+        '--autofit-larger=90%x90%',
+        '--geometry=50%:50%',
+        `--config-dir=${MPV_CONFIG_DIR}`,
+        `--input-ipc-server=${ipcSocket}`,
+        // macOS 显示原生标题栏（红绿灯在左上角）；mpv.conf 的 border=no 只适合 win/linux 的 uosc 无边框风格
+        ...(process.platform === 'darwin' ? ['--border=yes'] : []),
+        // 音轨/字幕/跳章节等按设置（放在默认项之后，同名参数后者覆盖）
+        ...mpvSettingArgs()
+      ]
   // 从上次进度续播
   if (typeof startSec === 'number' && startSec > 0) args.push(`--start=${startSec}`)
   // 详情页预选的音轨/字幕（覆盖设置里的语言偏好，故放最后）

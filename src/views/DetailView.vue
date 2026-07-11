@@ -7,6 +7,7 @@ import EditMetaDialog from '@/components/detail/EditMetaDialog.vue'
 import EpisodeList from '@/components/detail/EpisodeList.vue'
 import CastRow from '@/components/detail/CastRow.vue'
 import MediaTechInfo from '@/components/detail/MediaTechInfo.vue'
+import MediaInfoSkeleton from '@/components/detail/MediaInfoSkeleton.vue'
 import TrackPicker from '@/components/detail/TrackPicker.vue'
 import MediaRow from '@/components/library/MediaRow.vue'
 import PosterCard from '@/components/library/PosterCard.vue'
@@ -27,7 +28,9 @@ const {
   clearMetaOverride,
   removeManualSeries,
   probeFileTech,
-  loadEmbyTracks
+  probeFileEpisode,
+  loadEmbyTracks,
+  loadEmbyEpisode
 } = useLibrary()
 const player = usePlayer()
 
@@ -69,6 +72,24 @@ function ungroup() {
 // 续看集 id：用于剧集列表自动定位/高亮到「正在看的那一集」
 const resumeId = computed(() => (item.value ? player.resumeEpisodeOf(item.value)?.id : undefined))
 
+// 剧集：当前「聚焦」的那一集（默认续看集，供文件信息/音轨字幕/播放）。点某集才把简介也切成该集的
+const selectedEp = ref<Episode | undefined>(undefined)
+const epFocused = ref(false) // 用户是否点过某集（点了简介才切成该集，否则保持整部剧的简介）
+function onSelectEp(ep: Episode) {
+  selectedEp.value = ep
+  epFocused.value = true
+}
+// 简介：点过单集才显示该集简介，否则整部剧的（界面默认不变）；文件信息/轨道则始终跟随聚焦集
+const displayOverview = computed(() =>
+  item.value?.type === 'series' && epFocused.value ? selectedEp.value?.overview : undefined
+)
+const displayTech = computed(() =>
+  item.value?.type === 'series' ? selectedEp.value?.tech : item.value?.tech
+)
+const displayTracks = computed(() =>
+  item.value?.type === 'series' ? selectedEp.value?.tracks : item.value?.tracks
+)
+
 const related = computed(() => {
   const cur = item.value
   if (!cur) return []
@@ -77,38 +98,68 @@ const related = computed(() => {
     .slice(0, 10)
 })
 
+// 文件信息/音轨字幕加载中（用于骨架占位，避免一会有一会没有）。用 token 只让最近一次的结束态生效
+const infoLoading = ref(false)
+let loadToken = 0
+function trackLoad(p: Promise<unknown>) {
+  const my = ++loadToken
+  infoLoading.value = true
+  void p.finally(() => {
+    if (my === loadToken) infoLoading.value = false
+  })
+}
+// 拉某一集的文件信息 + 音轨/字幕（文件源 mpv 探测 / Emby 读 MediaStreams）
+function ensureEpisodeInfo(ep: Episode) {
+  const it = item.value
+  if (!it) return
+  trackLoad(ep.localPath ? probeFileEpisode(ep) : loadEmbyEpisode(ep, it.sourceId))
+}
+// 电影/合集/文件条目本身的文件信息 + 音轨/字幕
+function ensureItemInfo(it: MediaItem) {
+  if (it.localPath) trackLoad(probeFileTech(it))
+  else if (it.type !== 'collection') trackLoad(loadEmbyTracks(it))
+}
+// 加载中且还没数据 → 显示骨架占位
+const showInfoSkeleton = computed(() => infoLoading.value && !displayTech.value)
+
 // 剧集：懒加载季/集列表。监听 item 对象本身——loadFromEmby（刷新/播放结束）会用
 // 无 seasons 的新对象替换 item，此时需为新对象重新加载，否则剧集列表会消失
-// 按条目类型拉音轨/字幕：文件源用 mpv 探测，Emby/Jellyfin 读 MediaStreams
-function ensureTracks(it: MediaItem) {
-  if (it.localPath || it.id.startsWith('local-series:')) void probeFileTech(it)
-  else if (it.type !== 'collection') void loadEmbyTracks(it)
-}
-
 watch(
   item,
   (it, prev) => {
-    // 文件源剧集的季集是聚合时就建好的（id 前缀 local-series:），无需也不能走 Emby loadSeasons
-    if (it && it.type === 'series' && !it.seasons && !it.id.startsWith('local-series:')) {
-      loadSeasons(it.id)
-    }
-    // 按需拉取轨道（分辨率/编码 + 音轨/字幕）
-    if (it) ensureTracks(it)
-    // 切换到不同条目：重置音轨/字幕预选（不同视频轨道不同）
     if (it?.id !== prev?.id) {
       selAid.value = undefined
       selSid.value = undefined
+      selectedEp.value = undefined
+      epFocused.value = false
+    }
+    if (!it) return
+    if (it.type === 'series') {
+      // 文件源剧集季集聚合时已建（id 前缀 local-series:），Emby 剧集需懒加载
+      if (!it.seasons && !it.id.startsWith('local-series:')) loadSeasons(it.id)
+      // 默认聚焦续看集（seasons 已就绪时）
+      if (!selectedEp.value) selectedEp.value = player.resumeEpisodeOf(it)
+    } else {
+      ensureItemInfo(it)
     }
   },
   { immediate: true }
 )
-// Emby 剧集的代表集轨道要等季集异步加载完才能取 → seasons 到位后补拉一次
+// Emby 剧集季集异步到位后设默认聚焦集
 watch(
   () => item.value?.seasons,
   () => {
-    if (item.value) ensureTracks(item.value)
+    const it = item.value
+    if (it?.type === 'series' && !selectedEp.value) selectedEp.value = player.resumeEpisodeOf(it)
   }
 )
+// 聚焦集变化 → 加载该集文件信息/轨道 + 重置该集的轨道预选
+watch(selectedEp, (ep) => {
+  if (!ep) return
+  ensureEpisodeInfo(ep)
+  selAid.value = undefined
+  selSid.value = undefined
+})
 
 // 滚过 Hero 一定距离后，顶栏渐显磨砂背景 + 标题
 const scrolled = ref(false)
@@ -120,22 +171,24 @@ function play() {
   const it = item.value
   if (!it) return
   if (it.type === 'series') {
-    // 剧集：播续看的那一集（优先 NextUp），没有则播第一集
-    const resume = player.resumeEpisodeOf(it)
-    if (resume) player.play(it, resume, selectedTracks.value)
+    // 剧集：播当前聚焦的那一集（默认续看集）
+    const ep = selectedEp.value ?? player.resumeEpisodeOf(it)
+    if (ep) player.play(it, ep, selectedTracks.value)
   } else {
     player.play(it, undefined, selectedTracks.value)
   }
 }
 function playEpisode(ep: Episode) {
-  if (item.value) player.play(item.value, ep, selectedTracks.value)
+  // 轨道预选只对当前聚焦集有效（选的是它的轨道）
+  const tracks = ep.id === selectedEp.value?.id ? selectedTracks.value : undefined
+  if (item.value) player.play(item.value, ep, tracks)
 }
 function playWith(playerName: string) {
   const it = item.value
   if (!it) return
   if (it.type === 'series') {
-    const resume = player.resumeEpisodeOf(it)
-    if (resume) player.playWith(it, resume, playerName, selectedTracks.value)
+    const ep = selectedEp.value ?? player.resumeEpisodeOf(it)
+    if (ep) player.playWith(it, ep, playerName, selectedTracks.value)
   } else {
     player.playWith(it, undefined, playerName, selectedTracks.value)
   }
@@ -186,6 +239,7 @@ function onPerson(person: Person) {
     <div class="detail__scroll" @scroll="onScroll">
       <DetailHero
         :item="item"
+        :override-overview="displayOverview"
         @play="play"
         @favorite="fav"
         @play-with="playWith"
@@ -193,21 +247,26 @@ function onPerson(person: Person) {
       />
 
       <div class="detail__body">
-        <div v-if="filePath && !item.tech" class="detail__file" :title="filePath">
+        <div v-if="filePath && !displayTech && !infoLoading" class="detail__file" :title="filePath">
           <span class="detail__file-label">{{ item.localPath ? '文件' : '文件夹' }}</span>
           <code class="detail__file-path">{{ filePath }}</code>
         </div>
-        <MediaTechInfo v-if="item.tech" :tech="item.tech" />
-        <TrackPicker
-          v-if="item.tracks"
-          :tracks="item.tracks"
-          v-model:aid="selAid"
-          v-model:sid="selSid"
-        />
+        <MediaInfoSkeleton v-if="showInfoSkeleton" />
+        <template v-else>
+          <MediaTechInfo v-if="displayTech" :tech="displayTech" />
+          <TrackPicker
+            v-if="displayTracks"
+            :tracks="displayTracks"
+            v-model:aid="selAid"
+            v-model:sid="selSid"
+          />
+        </template>
         <EpisodeList
           v-if="item.type === 'series' && item.seasons"
           :seasons="item.seasons"
           :resume-id="resumeId"
+          :selected-id="selectedEp?.id"
+          @select="onSelectEp"
           @play="playEpisode"
         />
         <CastRow v-if="item.cast.length" title="演职人员" :people="item.cast" @select="onPerson" />

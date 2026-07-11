@@ -36,6 +36,10 @@ export interface Episode {
   stillSeed: string
   /** 真实缩略图 URL（来自媒体服务器） */
   stillUrl?: string
+  /** 本集的视频格式/路径（详情页点该集时按需探测/加载） */
+  tech?: MediaTech
+  /** 本集的音轨/字幕（详情页点该集时按需探测/加载） */
+  tracks?: MediaTracks
 }
 
 export interface Season {

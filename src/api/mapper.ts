@@ -93,8 +93,9 @@ export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
     addedAt: item.DateCreated ? Date.parse(item.DateCreated) : Date.now(),
     lastPlayed: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) : undefined,
     tech: mapTech(item),
-    posterUrl: imageUrl(session.serverUrl, item.Id, 'Primary', primaryTag, 480),
-    backdropUrl: imageUrl(session.serverUrl, item.Id, 'Backdrop', backdropTag, 1280)
+    posterUrl: imageUrl(session.serverUrl, item.Id, 'Primary', primaryTag, 600),
+    // 背景图铺满详情页 hero，1280 在大屏会被拉糊 → 要更高分辨率
+    backdropUrl: imageUrl(session.serverUrl, item.Id, 'Backdrop', backdropTag, 1920)
   }
 }
 

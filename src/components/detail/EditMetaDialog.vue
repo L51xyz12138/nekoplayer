@@ -4,11 +4,12 @@ import { X, Wand2 } from 'lucide-vue-next'
 import PosterImage from '@/components/common/PosterImage.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import type { MediaItem, Person } from '@/types/media'
+import type { TmdbCandidate, TmdbSeason } from '@/api/tmdb'
 
 const props = defineProps<{ open: boolean; item: MediaItem | null }>()
 const emit = defineEmits<{ close: []; save: [data: Partial<MediaItem>]; reset: [] }>()
 
-const { scrapeByName } = useLibrary()
+const { searchByName, scrapeCandidate, loadTvSeasons } = useLibrary()
 
 const form = reactive({ title: '', year: '' as string | number, overview: '', posterUrl: '' })
 const isTv = ref(false)
@@ -16,6 +17,11 @@ const isTv = ref(false)
 const extra = reactive<Partial<MediaItem>>({})
 const matching = ref(false)
 const matchMsg = ref('')
+// 多个匹配时的候选项，让用户挑正确的那个
+const candidates = ref<TmdbCandidate[]>([])
+// 匹配到多季剧集时的季列表，让用户挑对应的季（用季海报/简介）
+const seasons = ref<TmdbSeason[]>([])
+const pickedSeason = ref<number | null>(null)
 
 watch(
   () => props.open,
@@ -27,6 +33,9 @@ watch(
     form.posterUrl = props.item.posterUrl || ''
     isTv.value = props.item.type === 'series'
     matchMsg.value = ''
+    candidates.value = []
+    seasons.value = []
+    pickedSeason.value = null
     ;(Object.keys(extra) as (keyof MediaItem)[]).forEach((k) => delete extra[k])
   }
 )
@@ -44,25 +53,65 @@ async function rematch() {
   if (!q) return
   matching.value = true
   matchMsg.value = ''
+  candidates.value = []
+  seasons.value = []
+  pickedSeason.value = null
   try {
-    const r = await scrapeByName(q, isTv.value)
+    const list = await searchByName(q, isTv.value)
+    if (!list.length) {
+      matchMsg.value = '没匹配到——换个更准确的名字，或确认设置里填了 TMDB Key'
+    } else if (list.length === 1) {
+      await applyCandidate(list[0]) // 只有一个结果直接用
+    } else {
+      candidates.value = list // 多个结果让用户选
+      matchMsg.value = `找到 ${list.length} 个匹配，点选正确的那个：`
+    }
+  } finally {
+    matching.value = false
+  }
+}
+
+// 选中某个候选项 → 拉完整元数据填进表单
+async function applyCandidate(cand: TmdbCandidate) {
+  matching.value = true
+  try {
+    const r = await scrapeCandidate(cand)
     if (r) {
       form.title = r.title
       form.year = r.year || form.year
       form.overview = r.overview || form.overview
       form.posterUrl = r.posterUrl || form.posterUrl
+      isTv.value = r.type === 'series'
       extra.genres = r.genres
       extra.cast = r.cast as Person[]
       extra.backdropUrl = r.backdropUrl
       extra.rating = r.rating
       extra.tagline = r.tagline
-      matchMsg.value = `已匹配到「${r.title}」${r.year ? ` (${r.year})` : ''}，点保存生效`
-    } else {
-      matchMsg.value = '没匹配到——换个更准确的名字，或确认设置里填了 TMDB Key'
+      matchMsg.value = `已选「${r.title}」${r.year ? ` (${r.year})` : ''}，点保存生效`
+    }
+    candidates.value = []
+    // 剧集多季 → 让用户挑对应的季（用季海报/简介）
+    seasons.value = []
+    pickedSeason.value = null
+    if (cand.mediaType === 'tv') {
+      const ss = await loadTvSeasons(cand.id)
+      if (ss.length > 1) {
+        seasons.value = ss
+        matchMsg.value = `已选「${cand.title}」，这部剧有 ${ss.length} 季，可选对应的季：`
+      }
     }
   } finally {
     matching.value = false
   }
+}
+
+// 选中某一季 → 用该季的海报/简介/年份细化（剧名保持不变）
+function applySeason(s: TmdbSeason) {
+  pickedSeason.value = s.seasonNumber
+  if (s.posterUrl) form.posterUrl = s.posterUrl
+  if (s.overview) form.overview = s.overview
+  if (s.year) form.year = s.year
+  matchMsg.value = `已选「${s.name}」，点保存生效`
 }
 
 function save() {
@@ -129,6 +178,51 @@ function save() {
               <p v-if="matchMsg" class="edit__msg">{{ matchMsg }}</p>
             </div>
           </div>
+
+          <!-- 多个匹配项：点选正确的那个 -->
+          <div v-if="candidates.length" class="cands">
+            <button
+              v-for="c in candidates"
+              :key="c.mediaType + c.id"
+              class="cand"
+              :disabled="matching"
+              @click="applyCandidate(c)"
+            >
+              <div class="cand__poster">
+                <PosterImage :seed="String(c.id)" :title="c.title" :src="c.posterUrl" kind="poster" />
+              </div>
+              <div class="cand__info">
+                <span class="cand__title">{{ c.title }}</span>
+                <span class="cand__meta">
+                  {{ c.mediaType === 'tv' ? '剧集' : '电影' }}{{ c.year ? ` · ${c.year}` : '' }}{{ c.rating ? ` · ★ ${c.rating}` : '' }}
+                </span>
+                <span v-if="c.overview" class="cand__ov">{{ c.overview }}</span>
+              </div>
+            </button>
+          </div>
+
+          <!-- 多季剧集：挑对应的季（用该季海报/简介） -->
+          <div v-if="seasons.length" class="cands">
+            <button
+              v-for="s in seasons"
+              :key="s.seasonNumber"
+              class="cand"
+              :class="{ 'cand--on': pickedSeason === s.seasonNumber }"
+              :disabled="matching"
+              @click="applySeason(s)"
+            >
+              <div class="cand__poster">
+                <PosterImage :seed="'s' + s.seasonNumber" :title="s.name" :src="s.posterUrl" kind="poster" />
+              </div>
+              <div class="cand__info">
+                <span class="cand__title">{{ s.name }}</span>
+                <span class="cand__meta">
+                  {{ s.episodeCount ? `${s.episodeCount} 集` : '' }}{{ s.year ? ` · ${s.year}` : '' }}
+                </span>
+                <span v-if="s.overview" class="cand__ov">{{ s.overview }}</span>
+              </div>
+            </button>
+          </div>
         </div>
 
         <footer class="dialog__foot">
@@ -160,7 +254,7 @@ function save() {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 560px;
+  max-width: 700px;
   max-height: 86vh;
   background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
   border: 1px solid var(--border-strong);
@@ -203,7 +297,7 @@ function save() {
 }
 .edit__poster {
   flex-shrink: 0;
-  width: 132px;
+  width: 210px;
   aspect-ratio: 2 / 3;
   border-radius: var(--r-md);
   overflow: hidden;
@@ -307,6 +401,70 @@ function save() {
 .edit__msg {
   font-size: 12.5px;
   color: var(--text-dim);
+}
+
+.cands {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.cand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.cand:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.cand--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.cand:disabled {
+  opacity: 0.6;
+}
+.cand__poster {
+  flex-shrink: 0;
+  width: 42px;
+  aspect-ratio: 2 / 3;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-2);
+}
+.cand__info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cand__title {
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cand__meta {
+  font-size: 12px;
+  color: var(--text-mute);
+}
+.cand__ov {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .dialog__foot {

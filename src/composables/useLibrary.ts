@@ -18,15 +18,20 @@ import {
 import { mapEmbyItem, mapEpisodes, mapNextUp, progressOf } from '@/api/mapper'
 import {
   getPersonCredits,
+  getTvSeasons,
   parseEpisode,
+  scrapeById,
   scrapeMedia,
+  searchTmdb,
   type ScrapeResult,
+  type TmdbCandidate,
+  type TmdbSeason,
   type TmdbConfig
 } from '@/api/tmdb'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import { pget, pset } from './persist'
-import type { LibraryCategory, MediaItem, MediaTech, MediaTracks, SortMode } from '@/types/media'
+import type { Episode, LibraryCategory, MediaItem, MediaTech, MediaTracks, SortMode } from '@/types/media'
 import type { MediaSource } from '@/types/source'
 import type { NekoVideoFile } from '@/types/native'
 
@@ -336,7 +341,7 @@ function applyContinueWatching(
 // ---- 文件源刮削（TMDB）：结果按「文件名派生标题」缓存，命中即复用，未命中不重试 ----
 const SCRAPE_KEY = 'neko-scrape-cache'
 // 刮削结果格式版本：加了演员/类型等字段就 +1，旧缓存作废重刮（否则老条目一直没演员/相关推荐）
-const SCRAPE_VER = '2'
+const SCRAPE_VER = '3' // 背景图改用 w1280 高清 → +1 让旧的 w500 缓存重刮
 function loadScrapeCache(): Record<string, ScrapeResult | null> {
   try {
     if (pget('neko-scrape-ver') !== SCRAPE_VER) return {} // 版本变了 → 清空重刮
@@ -403,20 +408,38 @@ function saveMetaOverride(id: string, data: Partial<MediaItem>) {
   saveCache(state.items)
 }
 
+function tmdbCfg(): TmdbConfig {
+  const s = useSettings().settings
+  return {
+    key: s.tmdbKey,
+    lang: s.tmdbLang || 'zh-CN',
+    apiBase: s.tmdbApiBase || 'https://api.themoviedb.org/3',
+    imgBase: s.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
+  }
+}
+
 /** 用指定名字重新匹配 TMDB（movie/剧集），供编辑弹窗「重新匹配」预览 */
 async function scrapeByName(query: string, isTv: boolean): Promise<ScrapeResult | null> {
-  const s = useSettings().settings
-  if (!s.tmdbKey || !query.trim()) return null
-  return scrapeMedia(
-    {
-      key: s.tmdbKey,
-      lang: s.tmdbLang || 'zh-CN',
-      apiBase: s.tmdbApiBase || 'https://api.themoviedb.org/3',
-      imgBase: s.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
-    },
-    query,
-    isTv
-  )
+  if (!useSettings().settings.tmdbKey || !query.trim()) return null
+  return scrapeMedia(tmdbCfg(), query, isTv)
+}
+
+/** 按名字搜 TMDB 返回多个候选（编辑弹窗有多个匹配时让用户选） */
+async function searchByName(query: string, isTv: boolean): Promise<TmdbCandidate[]> {
+  if (!useSettings().settings.tmdbKey || !query.trim()) return []
+  return searchTmdb(tmdbCfg(), query, isTv)
+}
+
+/** 把用户选中的候选项拉成完整元数据（详情 + 演职人员） */
+async function scrapeCandidate(cand: TmdbCandidate): Promise<ScrapeResult | null> {
+  if (!useSettings().settings.tmdbKey) return null
+  return scrapeById(tmdbCfg(), cand)
+}
+
+/** 取剧集的季列表（编辑元数据时多季可选） */
+async function loadTvSeasons(tvId: number): Promise<TmdbSeason[]> {
+  if (!useSettings().settings.tmdbKey) return []
+  return getTvSeasons(tmdbCfg(), tvId)
 }
 
 // ---- 手动把散条目组成剧集 / 解散（自动聚合修不了时的兜底）----
@@ -542,16 +565,14 @@ function buildTech(path: string, info: ProbeInfo): MediaTech {
   }
 }
 
-/** 探测文件源条目媒体信息 + 轨道并挂到 item.tech/tracks（缓存、按需，需 mpv）；剧集探首集作代表 */
-async function probeFileTech(item: MediaItem) {
+// 探测某个文件路径的媒体信息 + 轨道，挂到 target.tech/tracks（缓存、需 mpv）。target 可是条目或单集
+async function probePath(target: { tech?: MediaTech; tracks?: MediaTracks }, path: string) {
   const nn = window.nekoNative
-  if (!nn?.probeMedia || item.tech) return
-  const path = item.localPath || item.seasons?.[0]?.episodes?.[0]?.localPath
-  if (!path) return
+  if (!nn?.probeMedia || target.tech) return
   const cached = probeCache[path]
   if (cached) {
-    item.tech = cached.tech
-    item.tracks = cached.tracks
+    target.tech = cached.tech
+    target.tracks = cached.tracks
     return
   }
   const info = await nn.probeMedia(path, useSettings().settings.playerPaths.mpv || '')
@@ -559,9 +580,18 @@ async function probeFileTech(item: MediaItem) {
   const tech = buildTech(path, info)
   const tracks: MediaTracks = info.tracks || { audio: [], sub: [] }
   probeCache[path] = { tech, tracks }
-  item.tech = tech
-  item.tracks = tracks
+  target.tech = tech
+  target.tracks = tracks
   saveProbeCache()
+}
+/** 探测文件源条目媒体信息 + 轨道并挂到 item.tech/tracks（缓存、按需，需 mpv）；剧集探首集作代表 */
+async function probeFileTech(item: MediaItem) {
+  const path = item.localPath || item.seasons?.[0]?.episodes?.[0]?.localPath
+  if (path) await probePath(item, path)
+}
+/** 探测文件源某一集的媒体信息 + 轨道并挂到 ep.tech/tracks（详情页点该集时用） */
+async function probeFileEpisode(ep: Episode) {
+  if (ep.localPath) await probePath(ep, ep.localPath)
 }
 
 // 从 Emby 媒体信息组技术信息。总返回一个（哪怕无视频流也带回大小/码率/路径，先即时显示）；
@@ -591,6 +621,41 @@ function buildEmbyTech(info: EmbyMediaInfo): MediaTech {
 
 // Emby/Jellyfin 条目媒体信息（内存缓存，按取轨的目标 id）；供详情页音轨/字幕预选 + 视频格式/路径
 const embyTracksCache: Record<string, { tracks: MediaTracks; tech?: MediaTech }> = {}
+// 拉 targetId 的媒体信息（音轨/字幕 + 视频格式/路径）挂到 target.tech/tracks。target 可是条目或单集
+async function loadEmbyInfo(target: { tech?: MediaTech; tracks?: MediaTracks }, s: EmbySession, targetId: string) {
+  if (target.tracks) return
+  const cached = embyTracksCache[targetId]
+  if (cached) {
+    target.tracks = cached.tracks
+    if (cached.tech) target.tech = cached.tech
+    return
+  }
+  try {
+    const info = await getMediaInfo(s, targetId)
+    let tracks = info.tracks
+    let tech = buildEmbyTech(info)
+    // 服务器信息先即时上屏（大小/码率/路径；标准 Emby 还含分辨率/编码）——让「文件信息」框先出来，不空等探测
+    target.tech = tech
+    // 魔改/网盘版 Emby 常不返回 MediaStreams（实测 tv.bmhyk.vip 连 PlaybackInfo 都空）→ 用自带 mpv 探测直连流
+    // 补齐分辨率/编码/HDR + 轨道（复用 info.streamUrl，省一次条目详情请求；轨道号必与播放一致）
+    if (!info.video || (!tracks.audio.length && !tracks.sub.length)) {
+      const nn = window.nekoNative
+      if (nn?.probeMedia && info.streamUrl) {
+        const probe = await nn.probeMedia(info.streamUrl, useSettings().settings.playerPaths.mpv || '')
+        if (probe?.tracks && (probe.tracks.audio.length || probe.tracks.sub.length)) tracks = probe.tracks
+        // 探到真实画面 → 用探测结果覆盖成完整技术信息（路径优先用服务器给的）
+        if (probe?.width) {
+          tech = buildTech(info.path || info.streamUrl.split('?')[0], probe)
+          target.tech = tech
+        }
+      }
+    }
+    embyTracksCache[targetId] = { tracks, tech }
+    target.tracks = tracks
+  } catch {
+    /* 取信息失败：忽略（播放器里仍可切轨） */
+  }
+}
 /** 拉 Emby/Jellyfin 条目的音轨/字幕 + 视频格式/路径挂到 item（详情页按需）。
  * 电影取自身；剧集取代表集（续看集/第一集，需季集已加载，未加载则等加载后重调）。 */
 async function loadEmbyTracks(item: MediaItem) {
@@ -608,37 +673,12 @@ async function loadEmbyTracks(item: MediaItem) {
       eps[0]
     targetId = rep.id
   }
-  const cached = embyTracksCache[targetId]
-  if (cached) {
-    item.tracks = cached.tracks
-    if (cached.tech) item.tech = cached.tech
-    return
-  }
-  try {
-    const info = await getMediaInfo(s, targetId)
-    let tracks = info.tracks
-    let tech = buildEmbyTech(info)
-    // 服务器信息先即时上屏（大小/码率/路径；标准 Emby 还含分辨率/编码）——让「文件信息」框先出来，不空等探测
-    item.tech = tech
-    // 魔改/网盘版 Emby 常不返回 MediaStreams（实测 tv.bmhyk.vip 连 PlaybackInfo 都空）→ 用自带 mpv 探测直连流
-    // 补齐分辨率/编码/HDR + 轨道（复用 info.streamUrl，省一次条目详情请求；轨道号必与播放一致）
-    if (!info.video || (!tracks.audio.length && !tracks.sub.length)) {
-      const nn = window.nekoNative
-      if (nn?.probeMedia && info.streamUrl) {
-        const probe = await nn.probeMedia(info.streamUrl, useSettings().settings.playerPaths.mpv || '')
-        if (probe?.tracks && (probe.tracks.audio.length || probe.tracks.sub.length)) tracks = probe.tracks
-        // 探到真实画面 → 用探测结果覆盖成完整技术信息（路径优先用服务器给的）
-        if (probe?.width) {
-          tech = buildTech(info.path || info.streamUrl.split('?')[0], probe)
-          item.tech = tech
-        }
-      }
-    }
-    embyTracksCache[targetId] = { tracks, tech }
-    item.tracks = tracks
-  } catch {
-    /* 取信息失败：忽略（播放器里仍可切轨） */
-  }
+  await loadEmbyInfo(item, s, targetId)
+}
+/** 拉 Emby/Jellyfin 某一集的音轨/字幕 + 视频格式并挂到 ep（详情页点该集时用） */
+async function loadEmbyEpisode(ep: Episode, sourceId: string) {
+  const s = useSources().sessionOf(sourceId)
+  if (s) await loadEmbyInfo(ep, s, ep.id)
 }
 
 // 把外部拉到的条目并入库（按 id 去重），使详情页 getById 能找到、可导航
@@ -767,18 +807,45 @@ function commonFolder(folders: string[]): string {
 }
 
 // 「Season 1 / 第2季 / S03」这类季文件夹段
-const SEASON_SEG = /^(?:season\s*\d+|第\s*\d+\s*季|s\d{1,2})$/i
+const SEASON_SEG = /^(?:season\s*\d+|第\s*[\d一二三四五六七八九十]+\s*季|s\d{1,2})$/i
+// 中文数字 → 阿拉伯数字（一~九十九，季号够用）
+function cnNum(s: string): number {
+  const D: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+  if (/^\d+$/.test(s)) return +s
+  if (s in D) return D[s]
+  const m = s.match(/^([一二三四五六七八九])?十([一二三四五六七八九])?$/)
+  if (m) return (m[1] ? D[m[1]] : 1) * 10 + (m[2] ? D[m[2]] : 0)
+  return 0
+}
+// 从文件夹段解析「剧名 base + 季号」，使同剧各季归到一个 showFolder（爱情公寓1/2/3… → 爱情公寓 第1/2/3 季）。
+// 先经 folderShowName 清掉序号/年份/画质，再识别：第X季(含中文数字)/Season N/SNN/**末尾裸数字**。
+function parseShowSeason(seg: string): { base: string; season: number } {
+  const cleaned = folderShowName(seg)
+  let m = cleaned.match(/^(.*?)[\s._-]*(?:第\s*([\d一二三四五六七八九十]+)\s*季|season\s*(\d{1,2})|s(\d{1,2}))\s*$/i)
+  if (m) {
+    const n = cnNum(m[2] || m[3] || m[4])
+    if (n) return { base: m[1].trim() || cleaned, season: n }
+  }
+  // 末尾裸数字当季号（爱情公寓2 → 爱情公寓 第2季）；要求前面有非数字（避免「25」这类纯数字标题被拆）
+  m = cleaned.match(/^(.*?\D)\s*(\d{1,2})\s*$/)
+  if (m) return { base: m[1].trim(), season: +m[2] }
+  return { base: cleaned, season: 1 }
+}
 /** 剧集所在的「剧文件夹」：末段是季文件夹时取其父，否则取本身 */
 function showFolder(folder: string): string {
   const parts = folder.split('/').filter(Boolean)
-  if (parts.length >= 2 && SEASON_SEG.test(parts[parts.length - 1])) return parts.slice(0, -1).join('/')
-  return parts.join('/')
+  if (!parts.length) return ''
+  const last = parts[parts.length - 1]
+  // 纯季子文件夹（「剧名/Season 2」）→ 取父文件夹当剧
+  if (parts.length >= 2 && SEASON_SEG.test(last)) return parts.slice(0, -1).join('/')
+  // 季/番号写在文件夹名里（「剧名 第二季」「爱情公寓2」）→ 取 base 归并各季 → 聚合成一部多季剧
+  const { base } = parseShowSeason(last)
+  return [...parts.slice(0, -1), base].join('/')
 }
-/** 从文件夹末段推季号（无则第 1 季） */
+/** 从文件夹末段推季号（无则第 1 季）；支持 Season N / 第N季（含中文数字）/ SNN / 末尾裸数字 */
 function seasonFromFolder(folder: string): number {
   const last = folder.split('/').filter(Boolean).pop() ?? ''
-  const m = last.match(/(?:season\s*|第\s*|s)(\d{1,2})/i)
-  return m ? +m[1] : 1
+  return parseShowSeason(last).season
 }
 /** 把文件夹名清成可搜的剧名：去「09.」序号、年份、画质标签 */
 function folderShowName(seg: string): string {
@@ -1257,11 +1324,16 @@ export function useLibrary() {
     loadSeasons,
     saveMetaOverride,
     scrapeByName,
+    searchByName,
+    scrapeCandidate,
+    loadTvSeasons,
     clearMetaOverride,
     saveManualSeries,
     removeManualSeries,
     probeFileTech,
+    probeFileEpisode,
     loadEmbyTracks,
+    loadEmbyEpisode,
     loadPersonWorks
   }
 }

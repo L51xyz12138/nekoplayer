@@ -6,7 +6,7 @@ import IconButton from '@/components/common/IconButton.vue'
 import MetaBar from './MetaBar.vue'
 import type { MediaItem } from '@/types/media'
 
-const props = defineProps<{ item: MediaItem }>()
+const props = defineProps<{ item: MediaItem; overrideOverview?: string }>()
 const emit = defineEmits<{
   play: []
   favorite: []
@@ -73,7 +73,7 @@ const players: string[] = nn?.playMpv
           <span v-for="g in item.genres" :key="g" class="chip">{{ g }}</span>
         </div>
 
-        <p class="dhero__overview clamp-3">{{ item.overview }}</p>
+        <p class="dhero__overview clamp-3">{{ overrideOverview || item.overview }}</p>
 
         <div v-if="progressPct > 0" class="dhero__progress">
           <div class="dhero__progress-track"><span :style="{ width: progressPct + '%' }" /></div>
