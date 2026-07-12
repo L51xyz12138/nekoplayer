@@ -1,15 +1,24 @@
 import { computed, reactive } from 'vue'
 import { pget, pset, premove } from './persist'
 import {
+  addToList,
   getDeviceCode,
   getMe,
+  getTraktList,
   pollDeviceToken,
+  rateItem,
   refreshAccessToken,
+  removeFromList,
   traktConfigured,
+  unrateItem,
   type TraktDeviceCode,
+  type TraktListItem,
+  type TraktListKind,
+  type TraktRef,
   type TraktToken,
   type TraktUser
 } from '@/api/trakt'
+import type { MediaItem } from '@/types/media'
 
 const KEY = 'neko-trakt'
 
@@ -145,6 +154,108 @@ async function loadUser() {
   }
 }
 
+/** 拉某个同步列表（想看/评分/收藏）——未连接返回空 */
+async function loadList(kind: TraktListKind): Promise<TraktListItem[]> {
+  const tok = await validToken()
+  if (!tok) return []
+  return getTraktList(tok, kind)
+}
+
+// ---- 想看/收藏/评分 的当前状态（供详情页按钮显示 + 回推）----
+// key = `${'movie'|'show'}:${tmdbId}`
+const status = reactive({
+  loaded: false,
+  watchlist: new Set<string>(),
+  collection: new Set<string>(),
+  ratings: new Map<string, number>()
+})
+
+/** MediaItem → Trakt 引用（需有 tmdbId、非合集）；否则 null */
+function traktRefOf(item: MediaItem): TraktRef | null {
+  if (!item.tmdbId || item.type === 'collection') return null
+  return { type: item.type === 'series' ? 'show' : 'movie', ids: { tmdb: item.tmdbId } }
+}
+function keyOf(ref: TraktRef): string {
+  return `${ref.type}:${ref.ids.tmdb}`
+}
+
+/** 拉一次三个列表，建立成员/评分索引（详情页首次用到时调；force 强刷） */
+async function loadStatus(force = false) {
+  if (status.loaded && !force) return
+  const tok = await validToken()
+  if (!tok) return
+  const [wl, col, rt] = await Promise.all([
+    getTraktList(tok, 'watchlist'),
+    getTraktList(tok, 'collection'),
+    getTraktList(tok, 'ratings')
+  ])
+  status.watchlist = new Set(wl.filter((i) => i.ids.tmdb).map((i) => `${i.type}:${i.ids.tmdb}`))
+  status.collection = new Set(col.filter((i) => i.ids.tmdb).map((i) => `${i.type}:${i.ids.tmdb}`))
+  status.ratings = new Map(
+    rt.filter((i) => i.ids.tmdb && i.rating).map((i) => [`${i.type}:${i.ids.tmdb}`, i.rating!])
+  )
+  status.loaded = true
+}
+
+const inWatchlist = (item: MediaItem) => {
+  const r = traktRefOf(item)
+  return r ? status.watchlist.has(keyOf(r)) : false
+}
+const inCollection = (item: MediaItem) => {
+  const r = traktRefOf(item)
+  return r ? status.collection.has(keyOf(r)) : false
+}
+const ratingOf = (item: MediaItem) => {
+  const r = traktRefOf(item)
+  return r ? status.ratings.get(keyOf(r)) : undefined
+}
+
+/** 切换「想看」——乐观更新 + 回推，失败回滚 */
+async function toggleWatchlist(item: MediaItem) {
+  const ref = traktRefOf(item)
+  const tok = await validToken()
+  if (!ref || !tok) return
+  const key = keyOf(ref)
+  const has = status.watchlist.has(key)
+  if (has) status.watchlist.delete(key)
+  else status.watchlist.add(key)
+  const ok = has ? await removeFromList(tok, 'watchlist', ref) : await addToList(tok, 'watchlist', ref)
+  if (!ok) {
+    if (has) status.watchlist.add(key)
+    else status.watchlist.delete(key) // 回滚
+  }
+}
+/** 切换「收藏」 */
+async function toggleCollection(item: MediaItem) {
+  const ref = traktRefOf(item)
+  const tok = await validToken()
+  if (!ref || !tok) return
+  const key = keyOf(ref)
+  const has = status.collection.has(key)
+  if (has) status.collection.delete(key)
+  else status.collection.add(key)
+  const ok = has ? await removeFromList(tok, 'collection', ref) : await addToList(tok, 'collection', ref)
+  if (!ok) {
+    if (has) status.collection.add(key)
+    else status.collection.delete(key)
+  }
+}
+/** 评分（1-10）；rating=0 取消评分 */
+async function rate(item: MediaItem, rating: number) {
+  const ref = traktRefOf(item)
+  const tok = await validToken()
+  if (!ref || !tok) return
+  const key = keyOf(ref)
+  const prev = status.ratings.get(key)
+  if (rating > 0) status.ratings.set(key, rating)
+  else status.ratings.delete(key)
+  const ok = rating > 0 ? await rateItem(tok, ref, rating) : await unrateItem(tok, ref)
+  if (!ok) {
+    if (prev !== undefined) status.ratings.set(key, prev)
+    else status.ratings.delete(key) // 回滚
+  }
+}
+
 // 启动时若已有 token，后台校验 + 取用户名
 if (state.token) void loadUser()
 
@@ -156,6 +267,14 @@ export function useTrakt() {
     connect,
     cancelConnect,
     disconnect,
-    validToken
+    validToken,
+    loadList,
+    loadStatus,
+    inWatchlist,
+    inCollection,
+    ratingOf,
+    toggleWatchlist,
+    toggleCollection,
+    rate
   }
 }

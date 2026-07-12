@@ -18,6 +18,7 @@ import {
 import { mapEmbyItem, mapEpisodes, mapNextUp, progressOf } from '@/api/mapper'
 import {
   getPersonCredits,
+  getTmdbMeta,
   getTvEpisodes,
   getTvSeasons,
   parseEpisode,
@@ -32,6 +33,8 @@ import {
 } from '@/api/tmdb'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
+import { useTrakt } from './useTrakt'
+import type { TraktListKind } from '@/api/trakt'
 import { pget, pset } from './persist'
 import type { Episode, LibraryCategory, MediaItem, MediaTech, MediaTracks, SortMode } from '@/types/media'
 import type { MediaSource } from '@/types/source'
@@ -793,6 +796,82 @@ async function loadPersonWorks(sourceId: string, personId: string): Promise<Medi
   })
 }
 
+// Trakt 列表条目的 TMDB 元数据缓存（按 type:tmdbId），避免重复请求
+const traktMetaCache: Record<string, Partial<MediaItem> | null> = {}
+
+/** 「Trakt 列表」：拉某个列表（想看/评分/收藏）→ 已入库的（按 tmdbId+类型匹配）换成库内条目（可点开进详情）、
+ * 未入库的建占位并从 TMDB 补海报/简介（返回前补齐，故交给 ref 后即有海报）。需已连接 Trakt。 */
+async function loadTraktItems(kind: TraktListKind): Promise<MediaItem[]> {
+  const raw = await useTrakt().loadList(kind)
+  if (!raw.length) return []
+  const s = useSettings().settings
+  const cfg: TmdbConfig | null = s.tmdbKey
+    ? {
+        key: s.tmdbKey,
+        lang: s.tmdbLang || 'zh-CN',
+        apiBase: s.tmdbApiBase || 'https://api.themoviedb.org/3',
+        imgBase: s.tmdbImgBase || 'https://image.tmdb.org/t/p/w500'
+      }
+    : null
+  const result: MediaItem[] = []
+  const stubs: { tmdb: number; isTv: boolean; item: MediaItem }[] = []
+  for (const it of raw) {
+    const wantSeries = it.type === 'show'
+    // 已入库（文件源刮削后有 tmdbId）→ 用库内条目，可点开进详情
+    const lib = it.ids.tmdb
+      ? state.items.find(
+          (m) => m.tmdbId === it.ids.tmdb && (wantSeries ? m.type === 'series' : m.type === 'movie')
+        )
+      : undefined
+    if (lib) {
+      result.push(lib)
+      continue
+    }
+    // 未入库 → 建占位（Trakt 只给标题/年份，海报稍后从 TMDB 补）
+    const stub: MediaItem = {
+      id: `trakt:${kind}:${it.type}:${it.ids.trakt ?? it.ids.tmdb ?? it.title}`,
+      sourceId: '',
+      title: it.title,
+      type: wantSeries ? 'series' : 'movie',
+      year: it.year,
+      runtime: 0,
+      rating: it.rating ?? 0, // 评分列表用用户评分；其余等 TMDB 补
+      certification: '',
+      genres: [],
+      overview: '',
+      cast: [],
+      addedAt: 0,
+      tmdbId: it.ids.tmdb,
+      scraped: true
+    }
+    result.push(stub)
+    if (cfg && it.ids.tmdb) stubs.push({ tmdb: it.ids.tmdb, isTv: wantSeries, item: stub })
+  }
+  // 并发补 TMDB 海报/简介（占位条目）；限 8 并发、最多补前 120 个（避免超大列表首次久等，
+  // 靠后的先用 PosterImage 的占位封面，缓存后再访问会补上）
+  if (cfg && stubs.length) {
+    const cap = Math.min(stubs.length, 120)
+    let idx = 0
+    const worker = async () => {
+      while (idx < cap) {
+        const { tmdb, isTv, item } = stubs[idx++]
+        const key = `${isTv ? 'tv' : 'movie'}:${tmdb}`
+        if (!(key in traktMetaCache)) traktMetaCache[key] = await getTmdbMeta(cfg, isTv, tmdb)
+        const meta = traktMetaCache[key]
+        if (meta) {
+          if (meta.posterUrl) item.posterUrl = meta.posterUrl
+          if (meta.backdropUrl) item.backdropUrl = meta.backdropUrl
+          if (meta.overview) item.overview = meta.overview
+          if (!item.rating && meta.rating) item.rating = meta.rating
+          if (meta.genres?.length) item.genres = meta.genres
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: 8 }, worker))
+  }
+  return result
+}
+
 /** 后台刮削文件源条目（仅未命中缓存的走网络），更新条目并写缓存 */
 async function scrapeFileItems() {
   const { settings } = useSettings()
@@ -1509,6 +1588,7 @@ export function useLibrary() {
     loadEmbyTracks,
     loadEmbyEpisode,
     loadPersonWorks,
+    loadTraktItems,
     mergeItems
   }
 }

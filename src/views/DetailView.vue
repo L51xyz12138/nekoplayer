@@ -9,9 +9,11 @@ import CastRow from '@/components/detail/CastRow.vue'
 import MediaTechInfo from '@/components/detail/MediaTechInfo.vue'
 import MediaInfoSkeleton from '@/components/detail/MediaInfoSkeleton.vue'
 import TrackPicker from '@/components/detail/TrackPicker.vue'
+import TraktActions from '@/components/detail/TraktActions.vue'
 import MediaRow from '@/components/library/MediaRow.vue'
 import PosterCard from '@/components/library/PosterCard.vue'
 import { useLibrary } from '@/composables/useLibrary'
+import { useSources } from '@/composables/useSources'
 import { usePlayer, type PlayTracks } from '@/composables/usePlayer'
 import type { Episode, MediaItem, Person } from '@/types/media'
 
@@ -108,6 +110,20 @@ const related = computed(() => {
     .filter((m) => m.id !== cur.id && m.genres.some((g) => cur.genres.includes(g)))
     .slice(0, 10)
 })
+
+// 多源同片：按 tmdbId + 类型找库里所有「同一部」的版本（含当前）；>1 则详情页顶部可切换源
+const { getSource } = useSources()
+const sameVersions = computed(() => {
+  const it = item.value
+  if (!it?.tmdbId) return []
+  return items.value.filter((m) => m.tmdbId === it.tmdbId && m.type === it.type)
+})
+function sourceLabel(m: MediaItem): string {
+  return getSource(m.sourceId)?.name || (m.localPath ? '文件源' : '媒体源')
+}
+function switchSource(m: MediaItem) {
+  if (item.value && m.id !== item.value.id) router.push({ name: 'detail', params: { id: m.id } })
+}
 
 // 文件信息/音轨字幕加载中（用于骨架占位，避免一会有一会没有）。用 token 只让最近一次的结束态生效
 const infoLoading = ref(false)
@@ -273,6 +289,20 @@ function onPerson(person: Person) {
       />
 
       <div class="detail__body">
+        <!-- 多源同片：切换用哪个媒体源的版本 -->
+        <div v-if="sameVersions.length > 1" class="detail__sources">
+          <span class="detail__sources-label">媒体源</span>
+          <button
+            v-for="v in sameVersions"
+            :key="v.id"
+            class="detail__source"
+            :class="{ on: v.id === item.id }"
+            @click="switchSource(v)"
+          >
+            {{ sourceLabel(v) }}
+          </button>
+        </div>
+
         <div v-if="filePath && !displayTech && !infoLoading" class="detail__file" :title="filePath">
           <span class="detail__file-label">{{ item.localPath ? '文件' : '文件夹' }}</span>
           <code class="detail__file-path">{{ filePath }}</code>
@@ -287,6 +317,8 @@ function onPerson(person: Person) {
             v-model:sid="selSid"
           />
         </template>
+
+        <TraktActions :item="item" />
         <EpisodeList
           v-if="item.type === 'series' && item.seasons"
           :seasons="item.seasons"
@@ -405,6 +437,38 @@ function onPerson(person: Person) {
 }
 .detail__body {
   padding: 30px 44px 50px;
+}
+.detail__sources {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.detail__sources-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.detail__source {
+  height: 34px;
+  padding: 0 15px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  transition: color var(--dur), background var(--dur), border-color var(--dur);
+}
+.detail__source:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.detail__source.on {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
 }
 .detail__file {
   display: flex;

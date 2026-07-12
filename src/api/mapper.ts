@@ -73,11 +73,17 @@ export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
   const primaryTag = item.ImageTags?.Primary
   const backdropTag = item.BackdropImageTags?.[0]
 
+  // 从 ProviderIds 取 TMDB id（键名大小写因服务器而异）→ 供 Trakt 列表匹配库内条目
+  const pids = item.ProviderIds ?? {}
+  const tmdbKey = Object.keys(pids).find((k) => k.toLowerCase() === 'tmdb')
+  const tmdbId = tmdbKey && /^\d+$/.test(pids[tmdbKey]) ? Number(pids[tmdbKey]) : undefined
+
   return {
     id: item.Id,
     sourceId: session.serverId,
     title: item.Name,
     type,
+    tmdbId,
     year: item.ProductionYear ?? 0,
     runtime: item.RunTimeTicks ? Math.round(item.RunTimeTicks / TICKS_PER_MINUTE) : 0,
     rating: item.CommunityRating ? Math.round(item.CommunityRating * 10) / 10 : 0,

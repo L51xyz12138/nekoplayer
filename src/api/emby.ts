@@ -110,6 +110,8 @@ export interface EmbyItem {
   ParentIndexNumber?: number
   /** 分集所属剧集 id（NextUp 返回的分集带此字段） */
   SeriesId?: string
+  /** 外部库 id（Tmdb/Imdb/Tvdb…，键名大小写因服务器而异），供 Trakt 列表匹配 */
+  ProviderIds?: Record<string, string>
 }
 
 export interface EmbyPlaybackSource {
@@ -190,7 +192,7 @@ export async function getItems(
     IncludeItemTypes: 'Movie,Series',
     Recursive: 'true',
     Fields:
-      'Overview,Genres,ProductionYear,CommunityRating,OfficialRating,RunTimeTicks,Taglines,DateCreated,People,MediaSources,MediaStreams',
+      'Overview,Genres,ProductionYear,CommunityRating,OfficialRating,RunTimeTicks,Taglines,DateCreated,People,MediaSources,MediaStreams,ProviderIds',
     SortBy: 'DateCreated',
     SortOrder: 'Descending',
     ...params

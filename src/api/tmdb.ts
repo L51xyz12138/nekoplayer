@@ -410,3 +410,30 @@ export async function getPersonCredits(personId: string, cfg: TmdbConfig): Promi
     return []
   }
 }
+
+/** 按 TMDB id 取媒体基本信息（海报/背景/简介/评分/类型）——Trakt 列表只给 id，海报靠这个补。 */
+export async function getTmdbMeta(
+  cfg: TmdbConfig,
+  isTv: boolean,
+  tmdbId: number
+): Promise<Partial<MediaItem> | null> {
+  try {
+    const kind = isTv ? 'tv' : 'movie'
+    const q = new URLSearchParams({ api_key: cfg.key, language: cfg.lang })
+    const res = await fetch(`${cfg.apiBase}/${kind}/${tmdbId}?${q}`)
+    if (!res.ok) return null
+    const d = await res.json()
+    const date = d.release_date || d.first_air_date || ''
+    return {
+      title: d.title || d.name || '',
+      year: date ? parseInt(date.slice(0, 4), 10) || 0 : 0,
+      posterUrl: d.poster_path ? cfg.imgBase + d.poster_path : undefined,
+      backdropUrl: d.backdrop_path ? backdropBase(cfg.imgBase) + d.backdrop_path : undefined,
+      overview: d.overview || '',
+      rating: d.vote_average ? Math.round(d.vote_average * 10) / 10 : 0,
+      genres: Array.isArray(d.genres) ? d.genres.map((g: { name: string }) => g.name).filter(Boolean) : []
+    }
+  } catch {
+    return null
+  }
+}

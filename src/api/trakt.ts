@@ -116,3 +116,84 @@ export async function getMe(token: string): Promise<TraktUser> {
   const u = await res.json()
   return { username: u.username, name: u.name }
 }
+
+// ---- 同步列表：想看(watchlist) / 评分(ratings) / 收藏(collection) ----
+export type TraktListKind = 'watchlist' | 'ratings' | 'collection'
+
+/** Trakt 列表里的一条（电影或剧）。Trakt 只给 id/标题/年份（无海报，海报另从 TMDB 补） */
+export interface TraktListItem {
+  type: 'movie' | 'show'
+  ids: { trakt?: number; tmdb?: number; imdb?: string }
+  title: string
+  year: number
+  /** 评分列表才有：用户打的分（1-10） */
+  rating?: number
+}
+
+/** 拉某个列表（电影 + 剧各拉一次再合并）。需已授权 token */
+export async function getTraktList(token: string, kind: TraktListKind): Promise<TraktListItem[]> {
+  const fetchType = async (t: 'movies' | 'shows'): Promise<TraktListItem[]> => {
+    try {
+      const res = await fetch(`${API}/sync/${kind}/${t}`, { headers: traktHeaders(token) })
+      if (!res.ok) return []
+      const data = await res.json()
+      if (!Array.isArray(data)) return []
+      const out: TraktListItem[] = []
+      for (const row of data) {
+        const mv = row.movie || row.show
+        if (!mv) continue
+        out.push({
+          type: row.movie ? 'movie' : 'show',
+          ids: { trakt: mv.ids?.trakt, tmdb: mv.ids?.tmdb ?? undefined, imdb: mv.ids?.imdb ?? undefined },
+          title: mv.title || '',
+          year: mv.year || 0,
+          rating: typeof row.rating === 'number' ? row.rating : undefined
+        })
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+  const [movies, shows] = await Promise.all([fetchType('movies'), fetchType('shows')])
+  return [...movies, ...shows]
+}
+
+// ---- 回推：加/移出 想看·收藏、评分 ----
+/** 一个 Trakt 电影/剧引用：type + ids（用于回推的 body） */
+export interface TraktRef {
+  type: 'movie' | 'show'
+  ids: { tmdb?: number; imdb?: string }
+}
+function refBody(ref: TraktRef, rating?: number) {
+  const entry = rating ? { ids: ref.ids, rating } : { ids: ref.ids }
+  return ref.type === 'movie' ? { movies: [entry] } : { shows: [entry] }
+}
+async function syncPost(token: string, path: string, body: unknown): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}${path}`, {
+      method: 'POST',
+      headers: traktHeaders(token),
+      body: JSON.stringify(body)
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+/** 加入 想看/收藏 */
+export function addToList(token: string, kind: 'watchlist' | 'collection', ref: TraktRef) {
+  return syncPost(token, `/sync/${kind}`, refBody(ref))
+}
+/** 移出 想看/收藏 */
+export function removeFromList(token: string, kind: 'watchlist' | 'collection', ref: TraktRef) {
+  return syncPost(token, `/sync/${kind}/remove`, refBody(ref))
+}
+/** 评分（1-10） */
+export function rateItem(token: string, ref: TraktRef, rating: number) {
+  return syncPost(token, '/sync/ratings', refBody(ref, rating))
+}
+/** 取消评分 */
+export function unrateItem(token: string, ref: TraktRef) {
+  return syncPost(token, '/sync/ratings/remove', refBody(ref))
+}
