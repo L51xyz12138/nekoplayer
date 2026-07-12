@@ -270,18 +270,39 @@ export function imageUrl(
 export async function getMpvPlayback(
   session: EmbySession,
   itemId: string
-): Promise<{ url: string; playSessionId: string }> {
+): Promise<{
+  url: string
+  playSessionId: string
+  /** 条目在 TMDB/IMDB 的 id（来自 ProviderIds），供 Trakt scrobble 匹配 */
+  ids: { tmdb?: number; imdb?: string }
+  /** 'movie' | 'episode' | 'other'（来自 Emby Type） */
+  type: 'movie' | 'episode' | 'other'
+}> {
   // 直接取条目详情（带 MediaSources 字段）拿正确的媒体源 Id——
   // 部分魔改/网盘挂载服务器的 PlaybackInfo 返回空 MediaSources，条目详情却带得到
   const res = await request(
     session.serverUrl,
-    `/Users/${session.userId}/Items/${itemId}?Fields=MediaSources,Path`,
+    `/Users/${session.userId}/Items/${itemId}?Fields=MediaSources,Path,ProviderIds`,
     session.token
   )
   const data = await res.json()
   const source = data.MediaSources?.[0] as EmbyPlaybackSource | undefined
   const playSessionId = ''
   const sourceId: string = source?.Id ?? itemId
+
+  // ProviderIds 键名大小写因服务器而异，做个不分大小写的取值
+  const pids: Record<string, string> = data.ProviderIds ?? {}
+  const pick = (k: string) => {
+    const hit = Object.keys(pids).find((x) => x.toLowerCase() === k)
+    return hit ? pids[hit] : undefined
+  }
+  const tmdbRaw = pick('tmdb')
+  const ids: { tmdb?: number; imdb?: string } = {}
+  if (tmdbRaw && /^\d+$/.test(tmdbRaw)) ids.tmdb = Number(tmdbRaw)
+  const imdb = pick('imdb')
+  if (imdb) ids.imdb = imdb
+  const type: 'movie' | 'episode' | 'other' =
+    data.Type === 'Movie' ? 'movie' : data.Type === 'Episode' ? 'episode' : 'other'
 
   let url: string
   if (source?.DirectStreamUrl) {
@@ -300,7 +321,7 @@ export async function getMpvPlayback(
     })
     url = `${session.serverUrl}/Videos/${itemId}/stream.${container}?${q}`
   }
-  return { url, playSessionId }
+  return { url, playSessionId, ids, type }
 }
 
 /** Emby/Jellyfin 条目的媒体信息（供详情页预选轨道 + 显示视频格式/文件路径） */

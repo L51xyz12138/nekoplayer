@@ -56,7 +56,7 @@ function scheduleFlush() {
 }
 // 媒体源/设置是关键小数据、变更也少 → 立即落盘（写在主进程，不阻塞渲染进程输入），
 // 避免「刚加了源/填了 Key，还没到去抖时间就被软件更新器强杀」导致丢失。大而频繁的库缓存仍走去抖。
-const IMMEDIATE_KEYS = new Set(['neko-sources', 'neko-settings'])
+const IMMEDIATE_KEYS = new Set(['neko-sources', 'neko-settings', 'neko-trakt'])
 ipcMain.on('store-get', (e, key) => {
   e.returnValue = persistStore[key] ?? null
 })
@@ -99,19 +99,44 @@ function resolveMpv(customPath) {
   return process.platform === 'win32' ? 'mpv.exe' : 'mpv'
 }
 
+// Trakt scrobble（在主进程发，因为这里有 mpv 进度）。⚠️ 必须带 User-Agent：Trakt 走 Cloudflare、
+// 会拦没 UA 的请求（Node/undici 默认无 UA → 403 HTML）；渲染进程有 Chromium UA 故只有主进程要显式给。
+async function traktScrobble(action, scrobble, progress) {
+  if (!scrobble?.token || !scrobble?.item) return
+  try {
+    const res = await fetch(`https://api.trakt.tv/scrobble/${action}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': `NekoPlayer/${app.getVersion()}`,
+        'trakt-api-version': '2',
+        'trakt-api-key': scrobble.clientId,
+        Authorization: `Bearer ${scrobble.token}`
+      },
+      body: JSON.stringify({ ...scrobble.item, progress })
+    })
+    console.log(`[trakt] scrobble/${action} progress=${Math.round(progress)}% → ${res.status}`)
+  } catch (e) {
+    console.error('[trakt] scrobble 失败：', e.message)
+  }
+}
+
 // 通过 mpv IPC：①跟踪播放位置退出时回传 Emby 进度；②文件加载后强制应用详情页预选的音轨/字幕
 // （用户自带 mpv 常有 sub-select/trackselect 脚本在 file-loaded 自动选轨，会盖掉命令行的 --aid/--sid，
-//   故在脚本选完后再经 IPC 设回一次）
-function trackMpvProgress(socketPath, emby, tracks) {
+//   故在脚本选完后再经 IPC 设回一次）；③Trakt scrobble（开播 start、退出 stop 带进度%）
+function trackMpvProgress(socketPath, emby, tracks, scrobble) {
   let lastPos = 0
+  let lastPct = 0
+  let scrobbleStarted = false
   let attempts = 0
   const connect = () => {
     const sock = net.connect(socketPath)
     sock.on('connect', () => {
       console.log('[mpv] IPC 已连接')
-      const send = (cmd) => {
+      // reqId=2 专给 duration，其余（time-pos）无 id；便于在 data 里区分
+      const send = (cmd, reqId) => {
         try {
-          sock.write(JSON.stringify({ command: cmd }) + '\n')
+          sock.write(JSON.stringify(reqId ? { command: cmd, request_id: reqId } : { command: cmd }) + '\n')
         } catch {
           /* ignore */
         }
@@ -125,13 +150,22 @@ function trackMpvProgress(socketPath, emby, tracks) {
           send(['set_property', 'sub-visibility', true]) // IPC 用 JSON 布尔（命令行才是 =yes）
         }
       }
-      // 仅 Emby 才需要 3s 上报进度
-      const timer = emby
-        ? setInterval(() => {
-            send(['get_property', 'time-pos'])
-            if (lastPos > 0) reportMpvProgress(emby, lastPos)
-          }, 3000)
-        : null
+      // scrobble 进度%：直接用 mpv 的 percent-pos（mpv 自己算，不依赖时长——时长拿不到时也准、更一致）；
+      // 极少数没读到 percent-pos 时才退回用 time-pos / 条目时长兜底
+      const progressPct = () => {
+        if (lastPct > 0) return Math.min(100, lastPct)
+        const total = scrobble?.runtime || 0
+        return total > 0 && lastPos > 0 ? Math.min(100, (lastPos / total) * 100) : 0
+      }
+      // Emby 上报进度 或 Trakt scrobble（退出算进度）都需要定时读位置
+      const timer =
+        emby || scrobble
+          ? setInterval(() => {
+              send(['get_property', 'time-pos'])
+              if (scrobble) send(['get_property', 'percent-pos'], 3)
+              if (emby && lastPos > 0) reportMpvProgress(emby, lastPos)
+            }, 3000)
+          : null
       let buf = ''
       sock.on('data', (chunk) => {
         buf += chunk.toString()
@@ -141,11 +175,21 @@ function trackMpvProgress(socketPath, emby, tracks) {
           buf = buf.slice(i + 1)
           try {
             const msg = JSON.parse(line)
-            if (msg.error === 'success' && typeof msg.data === 'number') lastPos = msg.data
-            // 文件加载完（脚本此时自动选轨）→ 稍后强制设回预选轨道；再补一次防脚本延迟覆盖
-            if (msg.event === 'file-loaded' && tracks) {
-              setTimeout(applyTracks, 400)
-              setTimeout(applyTracks, 1200)
+            if (msg.error === 'success' && typeof msg.data === 'number') {
+              if (msg.request_id === 3) lastPct = msg.data
+              else lastPos = msg.data // time-pos
+            }
+            if (msg.event === 'file-loaded') {
+              // 文件加载完（脚本此时自动选轨）→ 稍后强制设回预选轨道；再补一次防脚本延迟覆盖
+              if (tracks) {
+                setTimeout(applyTracks, 400)
+                setTimeout(applyTracks, 1200)
+              }
+              // 开始 scrobble（只对起播那一条，多集连播只算起始集，与 Emby 进度一致）
+              if (scrobble && !scrobbleStarted) {
+                scrobbleStarted = true
+                void traktScrobble('start', scrobble, 0)
+              }
             }
           } catch {
             /* ignore */
@@ -154,6 +198,8 @@ function trackMpvProgress(socketPath, emby, tracks) {
       })
       sock.on('close', () => {
         if (timer) clearInterval(timer)
+        // Trakt：退出即 stop，进度≥80% Trakt 自动标记已看、1–79% 存为暂停位
+        if (scrobble && scrobbleStarted) void traktScrobble('stop', scrobble, progressPct())
         if (!emby) return
         reportMpvStopped(emby, lastPos)
         // 延迟一下等 Emby 处理完 Stopped，再通知前端刷新，拉到最新进度
@@ -246,7 +292,7 @@ function mpvSettingArgs() {
 
 // 渲染进程请求用 mpv 播放（items: [{ url, title }]）
 ipcMain.handle('play-mpv', (_e, payload) => {
-  const { items, title, startIndex, mpvPath, startSec, emby, tracks } = payload || {}
+  const { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble } = payload || {}
   const list = Array.isArray(items) ? items : []
   if (!list.length) return false
 
@@ -341,9 +387,9 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     proc.on('exit', () => {
       if (mpvProc === proc) mpvProc = null
     })
-    if (emby || tracks) {
-      // emby → 进度回传；tracks → 文件加载后强制应用预选音轨/字幕（覆盖用户 mpv 的自动选轨脚本）
-      trackMpvProgress(ipcSocket, emby, tracks)
+    if (emby || tracks || scrobble) {
+      // emby → 进度回传；tracks → 文件加载后强制应用预选音轨/字幕；scrobble → Trakt 打点
+      trackMpvProgress(ipcSocket, emby, tracks, scrobble)
     }
     return true
   } catch (err) {

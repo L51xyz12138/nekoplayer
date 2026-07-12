@@ -29,7 +29,8 @@ export interface NekoNative {
     mpvPath?: string,
     startSec?: number,
     emby?: NekoEmbyProgress,
-    tracks?: { aid?: number; sid?: number | 'no' }
+    tracks?: { aid?: number; sid?: number | 'no' },
+    scrobble?: { token: string; clientId: string; item: Record<string, unknown>; runtime: number }
   ): Promise<boolean>
   /** 唤起系统外部播放器（iina/vlc/potplayer），可预选音轨/字幕（IINA/VLC 生效，PotPlayer 用自身菜单） */
   playExternal(

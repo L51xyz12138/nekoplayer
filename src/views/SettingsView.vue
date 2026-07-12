@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Check, Palette, Film, Captions, Info, Clapperboard, Github } from 'lucide-vue-next'
+import { Check, Palette, Film, Captions, Info, Clapperboard, Github, Tv } from 'lucide-vue-next'
 import Segmented from '@/components/common/Segmented.vue'
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { useSettings } from '@/composables/useSettings'
+import { useTrakt } from '@/composables/useTrakt'
 import iconUrl from '@/assets/icon.svg'
 
 const appVersion = __APP_VERSION__
 const { settings, themes } = useSettings()
+const trakt = useTrakt()
 const subColors = ['#ffffff', '#ffce53', '#7fe7ff', '#a0ff9d']
 
 // 按当前平台提供可选播放器
@@ -209,6 +211,52 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
           <div class="row">
             <div class="row__label"><h4>刮削语言</h4><p>匹配到的标题 / 简介语言</p></div>
             <Segmented v-model="tmdbLangLabel" :options="['中文', 'English']" />
+          </div>
+        </div>
+      </section>
+
+      <!-- Trakt -->
+      <section class="group">
+        <h2 class="group__title"><Tv :size="17" /> Trakt（观看记录同步）</h2>
+        <div class="card">
+          <!-- 已连接 -->
+          <div v-if="trakt.connected.value" class="row">
+            <div class="row__label">
+              <h4>已连接 Trakt<span v-if="trakt.state.user?.username"> · {{ trakt.state.user.username }}</span></h4>
+              <p>用 mpv 播放时会自动把观看进度同步到 Trakt、看完自动标记已看。</p>
+            </div>
+            <button class="trakt-btn trakt-btn--off" @click="trakt.disconnect">断开连接</button>
+          </div>
+
+          <!-- 配对中：显示配对码 + 授权链接，自动轮询 -->
+          <div v-else-if="trakt.state.status === 'pairing'" class="row">
+            <div class="row__label">
+              <h4>在浏览器里输入配对码</h4>
+              <p>打开授权页、输入下面的配对码完成授权，本页会自动检测（勿关闭）。</p>
+              <div class="trakt-pair">
+                <code class="trakt-code">{{ trakt.state.device?.user_code }}</code>
+                <a
+                  class="trakt-link"
+                  :href="trakt.state.device?.verification_url"
+                  target="_blank"
+                  rel="noreferrer"
+                >打开授权页 ↗</a>
+                <span class="trakt-waiting">等待授权中…</span>
+              </div>
+            </div>
+            <button class="trakt-btn trakt-btn--off" @click="trakt.cancelConnect">取消</button>
+          </div>
+
+          <!-- 未连接 -->
+          <div v-else class="row">
+            <div class="row__label">
+              <h4>连接 Trakt 账号</h4>
+              <p>连接后，用 mpv 播放会自动把进度同步到 Trakt、看完自动标记已看（其它外部播放器不支持自动同步）。后续还会支持想看列表 / 评分 / 推荐 / 历史。</p>
+              <p v-if="trakt.state.error" class="trakt-err">{{ trakt.state.error }}</p>
+            </div>
+            <button class="trakt-btn" :disabled="!trakt.configured.value" @click="trakt.connect">
+              {{ trakt.configured.value ? '连接 Trakt' : '未配置凭据' }}
+            </button>
           </div>
         </div>
       </section>
@@ -421,5 +469,67 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
 }
 .path-input:focus {
   border-color: var(--accent);
+}
+
+/* Trakt 连接 */
+.trakt-btn {
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 22px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: var(--r-pill);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.trakt-btn:hover {
+  opacity: 0.9;
+}
+.trakt-btn:active {
+  transform: scale(0.96);
+}
+.trakt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.trakt-btn--off {
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.trakt-pair {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+}
+.trakt-code {
+  padding: 8px 16px;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  user-select: all;
+}
+.trakt-link {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.trakt-link:hover {
+  color: var(--accent-2);
+}
+.trakt-waiting {
+  font-size: 13px;
+  color: var(--text-mute);
+}
+.trakt-err {
+  color: #ff6b6b !important;
 }
 </style>

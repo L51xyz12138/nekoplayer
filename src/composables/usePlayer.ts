@@ -1,7 +1,9 @@
 import { getMpvPlayback, reportPlaybackStart } from '@/api/emby'
+import { TRAKT_CLIENT_ID } from '@/api/trakt'
 import { useLibrary } from './useLibrary'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
+import { useTrakt } from './useTrakt'
 import type { Episode, MediaItem } from '@/types/media'
 
 // NekoPlayer 为 Electron 优先：播放统一交给外部播放器（mpv/IINA/VLC/PotPlayer），无内置 web 播放器。
@@ -11,6 +13,45 @@ import type { Episode, MediaItem } from '@/types/media'
 export interface PlayTracks {
   aid?: number
   sid?: number | 'no'
+}
+
+/** 传给主进程做 Trakt scrobble 的信息（仅 mpv、且已连接 Trakt、有可用 id 时才有值） */
+export interface ScrobbleInfo {
+  token: string
+  clientId: string
+  /** Trakt 条目体：{movie}|{show,episode}|{episode} */
+  item: Record<string, unknown>
+  /** 片长（秒）——mpv 拿不到时长时用它算进度% */
+  runtime: number
+}
+
+// 文件源 → Trakt 条目体（电影用自身 tmdbId、剧集用剧的 tmdbId + 季集号）
+function fileTraktItem(item: MediaItem, episode?: Episode): Record<string, unknown> | null {
+  if (!item.tmdbId) return null
+  if (episode) {
+    return { show: { ids: { tmdb: item.tmdbId } }, episode: { season: episode.season, number: episode.episode } }
+  }
+  return { movie: { ids: { tmdb: item.tmdbId } } }
+}
+// Emby/Jellyfin → Trakt 条目体（用 getMpvPlayback 拿到的 ProviderIds）
+function embyTraktItem(
+  type: 'movie' | 'episode' | 'other',
+  ids: { tmdb?: number; imdb?: string }
+): Record<string, unknown> | null {
+  if (ids.tmdb == null && !ids.imdb) return null
+  if (type === 'movie') return { movie: { ids } }
+  if (type === 'episode') return { episode: { ids } }
+  return null
+}
+// 组装 scrobble：需已连接 Trakt（拿到有效 token，会自动刷新）+ 有可用条目 id，否则返回 undefined（不 scrobble）
+async function buildScrobble(
+  traktItem: Record<string, unknown> | null,
+  runtimeMin: number
+): Promise<ScrobbleInfo | undefined> {
+  if (!traktItem) return undefined
+  const token = await useTrakt().validToken()
+  if (!token) return undefined
+  return { token, clientId: TRAKT_CLIENT_ID, item: traktItem, runtime: Math.round((runtimeMin || 0) * 60) }
 }
 
 /**
@@ -37,34 +78,37 @@ async function playSeriesResume(item: MediaItem, player: string, tracks?: PlayTr
   const { loadSeasons } = useLibrary()
   if (!item.seasons) await loadSeasons(item.id)
   const resume = resumeEpisodeOf(item)
-  if (resume) playWith(item, resume, player, tracks)
+  if (resume) void playWith(item, resume, player, tracks)
 }
 
 /** 播放入口：Electron 下交给外部播放器（按设置的默认播放器）；剧集未指定集则播续看集 */
-function play(item: MediaItem, episode?: Episode, tracks?: PlayTracks) {
+async function play(item: MediaItem, episode?: Episode, tracks?: PlayTracks) {
   if (!window.nekoNative?.playMpv) return // 非 Electron：无内置播放器
-  // 本机存储视频：直接播文件，无服务器进度同步
+  // 本机存储视频：直接播文件，无服务器进度同步（但可 scrobble 到 Trakt）
   if (item.localPath) {
-    playFile(item.localPath, item.title, undefined, tracks)
+    const scrobble = await buildScrobble(fileTraktItem(item), item.runtime)
+    playFile(item.localPath, item.title, undefined, tracks, scrobble)
     return
   }
   const player = useSettings().settings.playerMode
   if (item.type === 'series' && !episode) void playSeriesResume(item, player, tracks)
-  else playWith(item, episode, player, tracks)
+  else void playWith(item, episode, player, tracks)
 }
 
 /** 用指定播放器播放（mpv/IINA/VLC/PotPlayer）；剧集带整季播放列表；tracks 为详情页预选音轨/字幕 */
-function playWith(item: MediaItem, episode: Episode | undefined, player: string, tracks?: PlayTracks) {
+async function playWith(item: MediaItem, episode: Episode | undefined, player: string, tracks?: PlayTracks) {
   const native = window.nekoNative
   if (!native?.playMpv) return
   // 文件源剧集分集：播分集文件
   if (episode?.localPath) {
-    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player, tracks)
+    const scrobble = await buildScrobble(fileTraktItem(item, episode), episode.runtime || item.runtime)
+    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player, tracks, scrobble)
     return
   }
   // 文件源电影：直接用指定播放器播文件（无服务器进度同步）
   if (item.localPath) {
-    playFile(item.localPath, item.title, player, tracks)
+    const scrobble = await buildScrobble(fileTraktItem(item), item.runtime)
+    playFile(item.localPath, item.title, player, tracks, scrobble)
     return
   }
   const s = useSources().sessionOf(item.sourceId)
@@ -94,7 +138,7 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string,
       : Math.floor(prog * (startItem.runtime || 0) * 60)
 
   Promise.all(targetIds.map((id) => getMpvPlayback(s, id)))
-    .then((infos) => {
+    .then(async (infos) => {
       const playItems = infos.map((r, i) => {
         const ep = queue[i]
         return { url: r.url, title: ep ? `${ep.episode}. ${ep.title}` : label }
@@ -102,6 +146,11 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string,
       const psid = infos[startAt].playSessionId || `neko${Date.now()}`
       const playItemId = queue.length ? queue[startAt].id : targetId
       if (player === 'mpv') {
+        // Trakt scrobble：用起播条目的 ProviderIds（tmdb/imdb）匹配
+        const scrobble = await buildScrobble(
+          embyTraktItem(infos[startAt].type, infos[startAt].ids),
+          startItem.runtime
+        )
         native.playMpv!(
           playItems,
           label,
@@ -116,7 +165,8 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string,
             itemId: playItemId,
             playSessionId: psid
           },
-          tracks
+          tracks,
+          scrobble
         )
       } else if (native.playExternal) {
         const key = player.toLowerCase()
@@ -127,14 +177,21 @@ function playWith(item: MediaItem, episode: Episode | undefined, player: string,
     .catch((e) => console.error('[NekoPlayer] 取流失败：', e))
 }
 
-/** 播放本机/文件浏览类源的文件（外部播放器，无进度同步）；player 省略则用默认播放器；tracks 仅 mpv 生效 */
-function playFile(filePath: string, title: string, player?: string, tracks?: PlayTracks) {
+/** 播放本机/文件浏览类源的文件（外部播放器，无服务器进度同步）；player 省略则用默认播放器；
+ * tracks 仅 mpv 生效；scrobble 仅 mpv、已连接 Trakt 时有值 */
+function playFile(
+  filePath: string,
+  title: string,
+  player?: string,
+  tracks?: PlayTracks,
+  scrobble?: ScrobbleInfo
+) {
   const native = window.nekoNative
   if (!native?.playMpv) return
   const { settings } = useSettings()
   player = player || settings.playerMode
   if (player === 'mpv') {
-    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0, undefined, tracks)
+    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0, undefined, tracks, scrobble)
   } else if (native.playExternal) {
     const key = player.toLowerCase()
     native.playExternal(key, filePath, settings.playerPaths[key] || '', 0, tracks)
