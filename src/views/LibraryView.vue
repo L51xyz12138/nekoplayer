@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderTree, LayoutGrid, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { FolderTree, LayoutGrid, ChevronLeft, ChevronRight, RotateCw } from 'lucide-vue-next'
 import TopBar from '@/components/layout/TopBar.vue'
 import SourceTabs from '@/components/library/SourceTabs.vue'
 import LibraryTabs from '@/components/library/LibraryTabs.vue'
@@ -37,6 +37,7 @@ const {
   series,
   collections,
   featuredList,
+  refreshFeatured,
   loading,
   error,
   activeSourceId,
@@ -90,6 +91,11 @@ function prevHero() {
 function goHero(i: number) {
   slideDir.value = i >= heroIndex.value ? 'next' : 'prev'
   heroIndex.value = i
+  startHeroRotate()
+}
+// 换一批精选：重挑 6 部（heroIndex 由 watch(featuredList) 归 0），并重置自动切换计时
+function onRefreshFeatured() {
+  refreshFeatured()
   startHeroRotate()
 }
 watch(featuredList, () => (heroIndex.value = 0))
@@ -208,6 +214,9 @@ function play(item: MediaItem) {
                 <HeroBanner :key="heroItem.id" :item="heroItem" @play="play" />
               </transition>
             </div>
+            <button class="library__hero-refresh" title="换一批精选" @click="onRefreshFeatured">
+              <RotateCw :size="16" /> 换一批
+            </button>
             <template v-if="featuredList.length > 1">
               <button
                 class="library__hero-nav library__hero-nav--prev"
@@ -302,6 +311,33 @@ function play(item: MediaItem) {
   overflow: hidden;
   border-radius: var(--r-xl);
 }
+/* 换一批精选 */
+.library__hero-refresh {
+  position: absolute;
+  top: 22px;
+  right: 52px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-pill);
+  backdrop-filter: var(--blur);
+  transition: background var(--dur) var(--ease);
+}
+.library__hero-refresh:hover {
+  background: rgba(0, 0, 0, 0.72);
+}
+.library__hero-refresh:active {
+  transform: scale(0.96);
+}
+
 /* 悬浮时左右两侧的切换按钮 */
 .library__hero-nav {
   position: absolute;

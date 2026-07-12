@@ -218,13 +218,36 @@ const movies = computed(() => scoped.value.filter((m) => m.type === 'movie' && !
 const series = computed(() => scoped.value.filter((m) => m.type === 'series'))
 const collections = computed(() => scoped.value.filter((m) => m.type === 'collection'))
 
-/** 首页 Hero 精选：当前来源里评分最高的几部（合集不参与），首页轮播切换 */
-const featuredList = computed(() =>
-  scoped.value
-    .filter((m) => m.type !== 'collection' && !m.collectionId && (m.backdropUrl || m.posterUrl))
-    .slice()
-    .sort((a, b) => b.rating - a.rating)
-    .slice(0, 6)
+/** 首页 Hero 精选：从当前来源里「较高分且有背景/海报」的一批**随机挑 6 部**，可「换一批」刷新
+ * （不再永远是评分最高那几部）。合集/合集成员不参与。 */
+const featuredList = ref<MediaItem[]>([])
+function eligibleFeatured(): MediaItem[] {
+  return scoped.value.filter(
+    (m) => m.type !== 'collection' && !m.collectionId && (m.backdropUrl || m.posterUrl)
+  )
+}
+/** 换一批：从评分靠前的一批（最多 40）里洗牌取 6，兼顾质量与多样性 */
+function refreshFeatured() {
+  const pool = eligibleFeatured().sort((a, b) => b.rating - a.rating)
+  const top = pool.slice(0, Math.max(12, Math.min(40, pool.length)))
+  for (let i = top.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[top[i], top[j]] = [top[j], top[i]]
+  }
+  featuredList.value = top.slice(0, 6)
+}
+// 数据/作用域变化：把已选项换成当前响应式条目（保持最新）+ 去掉已不在的；空了（首次/切源）就重挑
+watch(
+  scoped,
+  () => {
+    const byId = new Map(scoped.value.map((m) => [m.id, m]))
+    const refreshed = featuredList.value
+      .map((m) => byId.get(m.id))
+      .filter((m): m is MediaItem => !!m)
+    if (refreshed.length !== featuredList.value.length) featuredList.value = refreshed
+    if (!featuredList.value.length) refreshFeatured()
+  },
+  { immediate: true }
 )
 
 function getById(id: string) {
@@ -1556,6 +1579,7 @@ export function useLibrary() {
     series,
     collections,
     featuredList,
+    refreshFeatured,
     getById,
     toggleFavorite,
     toggleWatched,
