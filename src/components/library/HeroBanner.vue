@@ -99,7 +99,9 @@ function openDetail() {
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.01em;
-  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  /* 固定亮色（不随主题翻转）+ 阴影，压在背景海报上也清晰 */
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
 }
 .hero__meta {
   display: flex;
@@ -108,7 +110,8 @@ function openDetail() {
   margin-top: 16px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-dim);
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 .hero__meta .dot {
   width: 3px;
@@ -126,7 +129,8 @@ function openDetail() {
   margin-top: 16px;
   font-size: 15px;
   line-height: 1.6;
-  color: var(--text-dim);
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 .hero__genres {
   display: flex;

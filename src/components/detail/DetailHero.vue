@@ -136,9 +136,10 @@ const players: string[] = nn?.playMpv
 .dhero__scrim {
   position: absolute;
   inset: 0;
+  /* 文字区（左下）压足够深的暗色垫底，保证任何背景图上文字都清晰（两个主题都是暗底亮字） */
   background:
-    linear-gradient(0deg, var(--bg-1) 2%, rgba(11, 12, 17, 0.4) 40%, transparent 78%),
-    linear-gradient(90deg, rgba(6, 7, 11, 0.7), transparent 60%);
+    linear-gradient(0deg, var(--bg-1) 0%, rgba(8, 9, 13, 0.74) 46%, rgba(8, 9, 13, 0.2) 72%, transparent 92%),
+    linear-gradient(90deg, rgba(6, 7, 11, 0.85) 0%, rgba(6, 7, 11, 0.35) 46%, transparent 68%);
 }
 
 .dhero__inner {
@@ -168,16 +169,21 @@ const players: string[] = nn?.playMpv
   font-weight: 800;
   line-height: 1.06;
   letter-spacing: -0.01em;
-  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  /* 固定亮色（不随主题翻转）——hero 背景是暗色遮罩过的海报，亮色 + 阴影两个主题都清晰 */
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
 }
 .dhero__tagline {
   margin-top: 10px;
   font-size: 15px;
   font-style: italic;
-  color: var(--text-mute);
+  color: rgba(255, 255, 255, 0.72);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
 }
 .dhero__info :deep(.meta) {
   margin-top: 16px;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 .dhero__genres {
   display: flex;
@@ -198,7 +204,8 @@ const players: string[] = nn?.playMpv
   margin-top: 16px;
   font-size: 15px;
   line-height: 1.65;
-  color: var(--text-dim);
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
 }
 .dhero__progress {
   display: flex;
