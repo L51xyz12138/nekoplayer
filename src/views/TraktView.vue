@@ -6,18 +6,20 @@ import PosterImage from '@/components/common/PosterImage.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useTrakt } from '@/composables/useTrakt'
 import type { MediaItem } from '@/types/media'
-import type { TraktListKind } from '@/api/trakt'
+import type { TraktTab } from '@/api/trakt'
 
 const router = useRouter()
 const { loadTraktItems, items } = useLibrary()
 const trakt = useTrakt()
 
-const TABS: { kind: TraktListKind; label: string }[] = [
+const TABS: { kind: TraktTab; label: string }[] = [
   { kind: 'watchlist', label: '想看' },
+  { kind: 'recommendations', label: '推荐' },
+  { kind: 'history', label: '历史' },
   { kind: 'ratings', label: '评分' },
   { kind: 'collection', label: '收藏' }
 ]
-const activeKind = ref<TraktListKind>('watchlist')
+const activeKind = ref<TraktTab>('watchlist')
 const works = ref<MediaItem[]>([])
 const loading = ref(false)
 

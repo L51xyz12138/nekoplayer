@@ -159,6 +159,70 @@ export async function getTraktList(token: string, kind: TraktListKind): Promise<
   return [...movies, ...shows]
 }
 
+/** Trakt「页」：三个同步列表 + 推荐 + 历史（TraktView 的 tab / loadTraktItems 的入参） */
+export type TraktTab = TraktListKind | 'recommendations' | 'history'
+
+/** 个性化推荐（电影+剧各拉一次；已收藏/已想看的排除）。需 token */
+export async function getRecommendations(token: string): Promise<TraktListItem[]> {
+  const fetchType = async (t: 'movies' | 'shows', type: 'movie' | 'show'): Promise<TraktListItem[]> => {
+    try {
+      const res = await fetch(
+        `${API}/recommendations/${t}?limit=60&ignore_collected=true&ignore_watchlisted=true`,
+        { headers: traktHeaders(token) }
+      )
+      if (!res.ok) return []
+      const data = await res.json()
+      if (!Array.isArray(data)) return []
+      const out: TraktListItem[] = []
+      for (const row of data) {
+        const mv = row.movie || row.show || row // 推荐一般直接是对象
+        if (!mv?.ids) continue
+        out.push({
+          type,
+          ids: { trakt: mv.ids.trakt, tmdb: mv.ids.tmdb ?? undefined, imdb: mv.ids.imdb ?? undefined },
+          title: mv.title || '',
+          year: mv.year || 0
+        })
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+  const [m, s] = await Promise.all([fetchType('movies', 'movie'), fetchType('shows', 'show')])
+  return [...m, ...s]
+}
+
+/** 观看历史（最近观看的电影 + 剧；剧集条目归到「剧」，按 tmdb 去重、保留最近）。需 token */
+export async function getHistory(token: string): Promise<TraktListItem[]> {
+  try {
+    const res = await fetch(`${API}/sync/history?limit=100`, { headers: traktHeaders(token) })
+    if (!res.ok) return []
+    const data = await res.json()
+    if (!Array.isArray(data)) return []
+    const out: TraktListItem[] = []
+    const seen = new Set<string>()
+    for (const row of data) {
+      const isEp = row.type === 'episode'
+      const mv = isEp ? row.show : row.movie // 剧集用其「剧」、电影用电影自身
+      if (!mv?.ids) continue
+      const type: 'movie' | 'show' = isEp ? 'show' : 'movie'
+      const key = `${type}:${mv.ids.tmdb ?? mv.ids.trakt}`
+      if (seen.has(key)) continue // 同一剧/电影多次观看只留最近一条
+      seen.add(key)
+      out.push({
+        type,
+        ids: { trakt: mv.ids.trakt, tmdb: mv.ids.tmdb ?? undefined, imdb: mv.ids.imdb ?? undefined },
+        title: mv.title || '',
+        year: mv.year || 0
+      })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
 // ---- 回推：加/移出 想看·收藏、评分 ----
 /** 一个 Trakt 电影/剧引用：type + ids（用于回推的 body） */
 export interface TraktRef {

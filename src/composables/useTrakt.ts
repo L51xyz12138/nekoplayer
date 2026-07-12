@@ -3,7 +3,9 @@ import { pget, pset, premove } from './persist'
 import {
   addToList,
   getDeviceCode,
+  getHistory,
   getMe,
+  getRecommendations,
   getTraktList,
   pollDeviceToken,
   rateItem,
@@ -13,8 +15,8 @@ import {
   unrateItem,
   type TraktDeviceCode,
   type TraktListItem,
-  type TraktListKind,
   type TraktRef,
+  type TraktTab,
   type TraktToken,
   type TraktUser
 } from '@/api/trakt'
@@ -154,11 +156,13 @@ async function loadUser() {
   }
 }
 
-/** 拉某个同步列表（想看/评分/收藏）——未连接返回空 */
-async function loadList(kind: TraktListKind): Promise<TraktListItem[]> {
+/** 拉某个 Trakt 页（想看/评分/收藏/推荐/历史）——未连接返回空 */
+async function loadList(tab: TraktTab): Promise<TraktListItem[]> {
   const tok = await validToken()
   if (!tok) return []
-  return getTraktList(tok, kind)
+  if (tab === 'recommendations') return getRecommendations(tok)
+  if (tab === 'history') return getHistory(tok)
+  return getTraktList(tok, tab)
 }
 
 // ---- 想看/收藏/评分 的当前状态（供详情页按钮显示 + 回推）----

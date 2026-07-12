@@ -34,7 +34,7 @@ import {
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import { useTrakt } from './useTrakt'
-import type { TraktListKind } from '@/api/trakt'
+import type { TraktTab } from '@/api/trakt'
 import { pget, pset } from './persist'
 import type { Episode, LibraryCategory, MediaItem, MediaTech, MediaTracks, SortMode } from '@/types/media'
 import type { MediaSource } from '@/types/source'
@@ -801,7 +801,7 @@ const traktMetaCache: Record<string, Partial<MediaItem> | null> = {}
 
 /** 「Trakt 列表」：拉某个列表（想看/评分/收藏）→ 已入库的（按 tmdbId+类型匹配）换成库内条目（可点开进详情）、
  * 未入库的建占位并从 TMDB 补海报/简介（返回前补齐，故交给 ref 后即有海报）。需已连接 Trakt。 */
-async function loadTraktItems(kind: TraktListKind): Promise<MediaItem[]> {
+async function loadTraktItems(kind: TraktTab): Promise<MediaItem[]> {
   const raw = await useTrakt().loadList(kind)
   if (!raw.length) return []
   const s = useSettings().settings
