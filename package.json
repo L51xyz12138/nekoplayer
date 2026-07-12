@@ -1,6 +1,6 @@
 {
   "name": "nekoplayer",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "private": true,
   "type": "module",
   "description": "跨平台媒体播放器",
@@ -21,6 +21,7 @@
     "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "lucide-vue-next": "^0.462.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",
@@ -39,6 +40,13 @@
   "build": {
     "appId": "com.nekoplayer.app",
     "productName": "NekoPlayer",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "L51xyz12138",
+        "repo": "nekoplayer"
+      }
+    ],
     "directories": {
       "output": "release",
       "buildResources": "buildResources"

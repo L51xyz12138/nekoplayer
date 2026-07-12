@@ -95,6 +95,8 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.deb
+            release/latest*.yml
+            release/*.blockmap
           if-no-files-found: ignore
 
       # 打了 v* 标签时，从 CHANGELOG 提取该版本更新说明
@@ -114,4 +116,6 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.deb
+            release/latest*.yml
+            release/*.blockmap
           fail_on_unmatched_files: false

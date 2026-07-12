@@ -9,6 +9,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dgram from 'node:dgram'
 import { createClient } from 'webdav'
+import electronUpdater from 'electron-updater'
+
+const { autoUpdater } = electronUpdater
 
 // 可播放的视频扩展名（本机/文件浏览类源用）
 const VIDEO_EXT = new Set([
@@ -552,10 +555,31 @@ ipcMain.handle('play-external', (_e, payload) => {
   return openExternal(player, url, appPath, startSec, tracks)
 })
 
-// 检查更新：查 GitHub 最新 release。⚠️ 必带 User-Agent。
-// 优先用 releases.atom（github.com 域名、**无频率限制**、比 api.github.com 更可达，尤其国内 CGNAT 共享 IP
-// 容易把 api 的 60 次/小时/IP 额度用光返回 403）；解析不到再退回 api.github.com。
-ipcMain.handle('check-update', async () => {
+// ---- 自动更新（electron-updater）----
+// 仅**打包后的 Windows / Linux(AppImage)** 能真·自动下载安装；macOS 未签名装不了、dev 下无 app-update.yml，
+// 这些情形回退到「查 releases.atom → 提示 → 前往下载」的手动模式。
+function canAutoUpdate() {
+  return app.isPackaged && (process.platform === 'win32' || process.platform === 'linux')
+}
+let updaterWired = false
+function wireUpdater() {
+  if (updaterWired) return
+  updaterWired = true
+  autoUpdater.autoDownload = false // 由用户点「下载」才下（不静默占带宽）
+  autoUpdater.autoInstallOnAppQuit = true
+  const send = (p) => {
+    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('update-event', p)
+  }
+  autoUpdater.on('update-available', (info) => send({ type: 'available', version: info.version }))
+  autoUpdater.on('update-not-available', () => send({ type: 'none' }))
+  autoUpdater.on('download-progress', (p) => send({ type: 'progress', percent: Math.round(p.percent) }))
+  autoUpdater.on('update-downloaded', (info) => send({ type: 'downloaded', version: info.version }))
+  autoUpdater.on('error', (err) => send({ type: 'error', message: String(err?.message || err) }))
+}
+
+// 手动检查（atom → api 兜底）：⚠️ 必带 User-Agent。releases.atom 无频率限制、比 api.github.com 更可达
+// （国内 CGNAT 共享 IP 易把 api 的 60 次/小时额度用光返 403）
+async function manualCheck() {
   const ua = `NekoPlayer/${app.getVersion()}`
   try {
     const res = await fetch('https://github.com/L51xyz12138/nekoplayer/releases.atom', {
@@ -563,14 +587,12 @@ ipcMain.handle('check-update', async () => {
     })
     if (res.ok) {
       const text = await res.text()
-      // atom 按时间倒序，第一个 tag 链接即最新 release
       const m = text.match(/<link[^>]*href="([^"]*\/releases\/tag\/([^"]+))"/)
-      if (m) return { version: m[2].replace(/^v/, ''), url: m[1], notes: '' }
+      if (m) return { mode: 'manual', version: m[2].replace(/^v/, ''), url: m[1], notes: '' }
     }
   } catch (e) {
     console.error('[update] atom 检查失败：', e.message)
   }
-  // 兜底：GitHub REST API（有 60 次/小时/IP 频率限制）
   try {
     const res = await fetch('https://api.github.com/repos/L51xyz12138/nekoplayer/releases/latest', {
       headers: { 'User-Agent': ua, Accept: 'application/vnd.github+json' }
@@ -578,6 +600,7 @@ ipcMain.handle('check-update', async () => {
     if (!res.ok) return null
     const d = await res.json()
     return {
+      mode: 'manual',
       version: String(d.tag_name || '').replace(/^v/, ''),
       url: d.html_url || 'https://github.com/L51xyz12138/nekoplayer/releases',
       notes: String(d.body || '')
@@ -585,6 +608,37 @@ ipcMain.handle('check-update', async () => {
   } catch (e) {
     console.error('[update] api 检查失败：', e.message)
     return null
+  }
+}
+
+ipcMain.handle('check-update', async () => {
+  if (canAutoUpdate()) {
+    try {
+      wireUpdater()
+      autoUpdater.checkForUpdates() // 结果经 'update-event' 推给前端
+      return { mode: 'auto' }
+    } catch (e) {
+      console.error('[update] autoUpdater 检查失败，回退手动：', e.message)
+    }
+  }
+  return manualCheck()
+})
+// 用户点「下载并安装」→ 下载（进度经 update-event）
+ipcMain.handle('download-update', () => {
+  try {
+    autoUpdater.downloadUpdate()
+    return true
+  } catch (e) {
+    console.error('[update] 下载失败：', e.message)
+    return false
+  }
+})
+// 下载完点「重启安装」→ 退出并安装
+ipcMain.on('quit-and-install', () => {
+  try {
+    autoUpdater.quitAndInstall()
+  } catch (e) {
+    console.error('[update] 安装失败：', e.message)
   }
 })
 

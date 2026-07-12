@@ -1,35 +1,40 @@
 import { reactive } from 'vue'
 
-// 软件内检查更新（轻量版）：查 GitHub 最新 release，发现新版就提示 + 一键去下载页。
-// 不自动安装（后续可再加 electron-updater 做 Win/Linux 真自动装）。
-
+// 软件内检查更新：
+// - 打包后的 Windows / Linux → auto 模式：electron-updater 在软件内下载 + 重启安装
+// - macOS(未签名) / dev / 出错 → manual 模式：提示 + 一键前往下载页
 const current = __APP_VERSION__
 
 interface UpdateState {
   checking: boolean
-  /** 最新版本号（不含 v） */
-  latest: string
-  hasUpdate: boolean
-  /** release 页面 URL */
-  url: string
-  /** 更新说明（release body） */
-  notes: string
-  error: string
-  /** 用户忽略了本次提示 */
-  dismissed: boolean
-  /** 是否已检查过（供设置页显示「已是最新」） */
   checked: boolean
+  hasUpdate: boolean
+  latest: string
+  mode: 'manual' | 'auto'
+  // manual：release 页面 + 更新说明
+  url: string
+  notes: string
+  // auto：下载进度 / 已下载
+  downloading: boolean
+  progress: number // 0-100
+  downloaded: boolean
+  error: string
+  dismissed: boolean
 }
 
 const state = reactive<UpdateState>({
   checking: false,
-  latest: '',
+  checked: false,
   hasUpdate: false,
+  latest: '',
+  mode: 'manual',
   url: '',
   notes: '',
+  downloading: false,
+  progress: 0,
+  downloaded: false,
   error: '',
-  dismissed: false,
-  checked: false
+  dismissed: false
 })
 
 /** 版本比较：a 比 b 新返回正数（按 . 分段逐位比数值，故 0.3.11 > 0.3.2） */
@@ -43,6 +48,32 @@ function cmpVer(a: string, b: string): number {
   return 0
 }
 
+// auto 模式的进度/结果经主进程事件推来（只注册一次）
+window.nekoNative?.onUpdateEvent?.((p) => {
+  state.mode = 'auto'
+  if (p.type === 'available') {
+    state.checking = false
+    state.latest = p.version
+    state.hasUpdate = true
+    state.dismissed = false
+  } else if (p.type === 'none') {
+    state.checking = false
+    state.checked = true
+    state.hasUpdate = false
+  } else if (p.type === 'progress') {
+    state.downloading = true
+    state.progress = p.percent
+  } else if (p.type === 'downloaded') {
+    state.downloading = false
+    state.downloaded = true
+    state.progress = 100
+  } else if (p.type === 'error') {
+    state.checking = false
+    state.downloading = false
+    state.error = '自动更新失败：' + p.message
+  }
+})
+
 async function check(): Promise<void> {
   if (!window.nekoNative?.checkUpdate || state.checking) return
   state.checking = true
@@ -50,26 +81,44 @@ async function check(): Promise<void> {
   try {
     const r = await window.nekoNative.checkUpdate()
     state.checked = true
-    if (r?.version) {
+    if (r?.mode === 'auto') {
+      state.mode = 'auto' // 结果经 onUpdateEvent 异步来，checking 由事件收尾
+    } else if (r?.mode === 'manual') {
+      state.mode = 'manual'
       state.latest = r.version
       state.url = r.url
       state.notes = r.notes
       state.hasUpdate = cmpVer(r.version, current) > 0
       if (state.hasUpdate) state.dismissed = false
+      state.checking = false
     } else {
       state.error = '检查更新失败（网络或频率限制）'
+      state.checking = false
     }
   } catch {
     state.error = '检查更新失败'
-  } finally {
     state.checking = false
   }
 }
 
-function dismiss() {
+/** auto 模式：下载更新（进度经事件） */
+async function download(): Promise<void> {
+  if (!window.nekoNative?.downloadUpdate) return
+  state.downloading = true
+  state.progress = 0
+  state.error = ''
+  await window.nekoNative.downloadUpdate()
+}
+
+/** auto 模式：下载完成后退出并安装 */
+function install(): void {
+  window.nekoNative?.quitAndInstall?.()
+}
+
+function dismiss(): void {
   state.dismissed = true
 }
 
 export function useUpdate() {
-  return { state, check, dismiss, current }
+  return { state, check, download, install, dismiss, current }
 }

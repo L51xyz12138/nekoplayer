@@ -279,9 +279,17 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
               <button class="about__check" :disabled="update.state.checking" @click="update.check()">
                 {{ update.state.checking ? '检查中…' : '检查更新' }}
               </button>
-              <span v-if="update.state.hasUpdate" class="about__update-new">
+              <span v-if="update.state.downloaded" class="about__update-new">
+                ✅ 更新已下载 v{{ update.state.latest }} ·
+                <a href="#" @click.prevent="update.install()">重启安装</a>
+              </span>
+              <span v-else-if="update.state.hasUpdate" class="about__update-new">
                 🎉 发现新版本 v{{ update.state.latest }} ·
-                <a :href="update.state.url" target="_blank" rel="noreferrer">前往下载</a>
+                <template v-if="update.state.mode === 'auto'">
+                  <a v-if="!update.state.downloading" href="#" @click.prevent="update.download()">下载并安装</a>
+                  <span v-else>下载中 {{ update.state.progress }}%</span>
+                </template>
+                <a v-else :href="update.state.url" target="_blank" rel="noreferrer">前往下载</a>
               </span>
               <span v-else-if="update.state.error" class="about__update-hint">{{ update.state.error }}</span>
               <span v-else-if="update.state.checked" class="about__update-hint">已是最新版 ✓</span>

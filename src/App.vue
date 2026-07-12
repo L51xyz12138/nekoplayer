@@ -43,15 +43,46 @@ onMounted(() => {
       </main>
     </div>
 
-    <!-- 发现新版本：右下角悬浮提示（点前往下载打开 release 页；× 忽略本次） -->
+    <!-- 发现新版本：右下角悬浮提示。auto(Win/Linux 打包版)在软件内下载+重启安装；manual(mac/dev)前往下载页 -->
     <transition name="fade">
-      <div v-if="update.state.hasUpdate && !update.state.dismissed" class="update-toast">
+      <div
+        v-if="(update.state.hasUpdate || update.state.downloaded) && !update.state.dismissed"
+        class="update-toast"
+      >
         <div class="update-toast__icon"><Sparkles :size="18" /></div>
         <div class="update-toast__text">
-          <strong>发现新版本 v{{ update.state.latest }}</strong>
-          <span>当前 v{{ update.current }}</span>
+          <template v-if="update.state.downloaded">
+            <strong>更新已就绪 v{{ update.state.latest }}</strong>
+            <span>重启即可安装</span>
+          </template>
+          <template v-else-if="update.state.downloading">
+            <strong>下载中… {{ update.state.progress }}%</strong>
+            <span>v{{ update.state.latest }}</span>
+          </template>
+          <template v-else>
+            <strong>发现新版本 v{{ update.state.latest }}</strong>
+            <span>当前 v{{ update.current }}</span>
+          </template>
         </div>
-        <a class="update-toast__go" :href="update.state.url" target="_blank" rel="noreferrer">前往下载</a>
+        <button v-if="update.state.downloaded" class="update-toast__go" @click="update.install()">
+          重启安装
+        </button>
+        <template v-else-if="update.state.mode === 'auto'">
+          <button
+            v-if="!update.state.downloading"
+            class="update-toast__go"
+            @click="update.download()"
+          >
+            下载并安装
+          </button>
+        </template>
+        <a
+          v-else
+          class="update-toast__go"
+          :href="update.state.url"
+          target="_blank"
+          rel="noreferrer"
+        >前往下载</a>
         <button class="update-toast__close" title="忽略本次" @click="update.dismiss()">
           <X :size="15" />
         </button>
