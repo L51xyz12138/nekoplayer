@@ -46,6 +46,8 @@ export interface NekoNative {
   onPlaybackEnded(cb: (itemId?: string) => void): void
   /** 文件源播放结束后主进程回传本地进度（供续播/继续观看） */
   onFileProgress(cb: (payload: { key: string; pos: number; pct: number }) => void): void
+  /** 检查更新：查 GitHub 最新 release，返回版本/页面/更新说明；失败返回 null */
+  checkUpdate(): Promise<{ version: string; url: string; notes: string } | null>
   /** 读持久化存储（同步，供模块初始化时用）；无值返回 null */
   storeGet(key: string): string | null
   /** 写持久化存储（异步、去抖落盘） */

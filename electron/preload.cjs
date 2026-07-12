@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('nekoNative', {
   onPlaybackEnded: (cb) => ipcRenderer.on('playback-ended', (_e, itemId) => cb(itemId)),
   // 文件源播放结束后主进程回传本地进度 { key, pos, pct }，前端存本地续播/继续观看
   onFileProgress: (cb) => ipcRenderer.on('file-progress', (_e, payload) => cb(payload)),
+  // 检查更新：查 GitHub 最新 release，返回 { version, url, notes } 或 null
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
   // 持久化存储（写到 userData 下的 json 文件，跨软件更新不丢；读同步、写异步）
   storeGet: (key) => ipcRenderer.sendSync('store-get', key),
   storeSet: (key, val) => ipcRenderer.send('store-set', { key, val }),

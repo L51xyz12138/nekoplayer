@@ -552,6 +552,42 @@ ipcMain.handle('play-external', (_e, payload) => {
   return openExternal(player, url, appPath, startSec, tracks)
 })
 
+// 检查更新：查 GitHub 最新 release。⚠️ 必带 User-Agent。
+// 优先用 releases.atom（github.com 域名、**无频率限制**、比 api.github.com 更可达，尤其国内 CGNAT 共享 IP
+// 容易把 api 的 60 次/小时/IP 额度用光返回 403）；解析不到再退回 api.github.com。
+ipcMain.handle('check-update', async () => {
+  const ua = `NekoPlayer/${app.getVersion()}`
+  try {
+    const res = await fetch('https://github.com/L51xyz12138/nekoplayer/releases.atom', {
+      headers: { 'User-Agent': ua }
+    })
+    if (res.ok) {
+      const text = await res.text()
+      // atom 按时间倒序，第一个 tag 链接即最新 release
+      const m = text.match(/<link[^>]*href="([^"]*\/releases\/tag\/([^"]+))"/)
+      if (m) return { version: m[2].replace(/^v/, ''), url: m[1], notes: '' }
+    }
+  } catch (e) {
+    console.error('[update] atom 检查失败：', e.message)
+  }
+  // 兜底：GitHub REST API（有 60 次/小时/IP 频率限制）
+  try {
+    const res = await fetch('https://api.github.com/repos/L51xyz12138/nekoplayer/releases/latest', {
+      headers: { 'User-Agent': ua, Accept: 'application/vnd.github+json' }
+    })
+    if (!res.ok) return null
+    const d = await res.json()
+    return {
+      version: String(d.tag_name || '').replace(/^v/, ''),
+      url: d.html_url || 'https://github.com/L51xyz12138/nekoplayer/releases',
+      notes: String(d.body || '')
+    }
+  } catch (e) {
+    console.error('[update] api 检查失败：', e.message)
+    return null
+  }
+})
+
 // 选择文件夹（添加本机存储源时用）
 ipcMain.handle('pick-folder', async () => {
   const r = await dialog.showOpenDialog(mainWin ?? undefined, { properties: ['openDirectory'] })

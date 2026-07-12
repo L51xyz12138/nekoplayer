@@ -5,11 +5,13 @@ import Segmented from '@/components/common/Segmented.vue'
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { useSettings } from '@/composables/useSettings'
 import { useTrakt } from '@/composables/useTrakt'
+import { useUpdate } from '@/composables/useUpdate'
 import iconUrl from '@/assets/icon.svg'
 
 const appVersion = __APP_VERSION__
 const { settings, themes } = useSettings()
 const trakt = useTrakt()
+const update = useUpdate()
 const subColors = ['#ffffff', '#ffce53', '#7fe7ff', '#a0ff9d']
 
 // 按当前平台提供可选播放器
@@ -273,6 +275,17 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
             <a class="about__repo" href="https://github.com/L51xyz12138/nekoplayer" target="_blank" rel="noreferrer">
               <Github :size="15" /> github.com/L51xyz12138/nekoplayer
             </a>
+            <div class="about__update">
+              <button class="about__check" :disabled="update.state.checking" @click="update.check()">
+                {{ update.state.checking ? '检查中…' : '检查更新' }}
+              </button>
+              <span v-if="update.state.hasUpdate" class="about__update-new">
+                🎉 发现新版本 v{{ update.state.latest }} ·
+                <a :href="update.state.url" target="_blank" rel="noreferrer">前往下载</a>
+              </span>
+              <span v-else-if="update.state.error" class="about__update-hint">{{ update.state.error }}</span>
+              <span v-else-if="update.state.checked" class="about__update-hint">已是最新版 ✓</span>
+            </div>
           </div>
         </div>
       </section>
@@ -436,6 +449,44 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
 }
 .about__repo:hover {
   color: var(--accent-2);
+}
+.about__update {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+}
+.about__check {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.about__check:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.about__check:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.about__update-new {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.about__update-new a {
+  text-decoration: underline;
+}
+.about__update-hint {
+  font-size: 13px;
+  color: var(--text-mute);
 }
 
 .path-cell {
