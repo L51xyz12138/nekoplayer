@@ -4,7 +4,8 @@
 
 **跨平台媒体播放器**
 
-连接 Emby / Jellyfin / Plex 媒体服务器，用你喜欢的播放器畅享影音喵～
+连接 Emby / Jellyfin 服务器，或直接浏览本机 / WebDAV / SMB / DLNA 文件源，
+用你喜欢的外部播放器畅享影音、并可与 Trakt 同步观看记录喵～
 
 [![Build](https://github.com/L51xyz12138/nekoplayer/actions/workflows/build.yml/badge.svg)](https://github.com/L51xyz12138/nekoplayer/actions)
 [![Release](https://img.shields.io/github/v/release/L51xyz12138/nekoplayer)](https://github.com/L51xyz12138/nekoplayer/releases)
@@ -14,12 +15,28 @@
 
 ## ✨ 特性
 
-- 🎬 **多媒体源** —— 连接 Emby / Jellyfin / Plex，可聚合浏览也可单独查看
-- 🖥️ **跨平台** —— Windows / macOS / Linux 桌面客户端
-- ▶️ **外部播放器** —— mpv / IINA / VLC / PotPlayer，本地解码不转码，NAS/服务器零转码负载
-- 📦 **开箱即用** —— 自带 mpv（含 [uosc](https://github.com/tomasklaen/uosc) 现代界面 + 中文菜单），无需另外安装
-- 🎞️ **整季连播** —— 剧集自动播放下一集
-- 🎨 **精致 UI** —— 海报墙、多主题强调色、详情页、演职人员、进度同步
+### 📚 媒体源
+- **Emby / Jellyfin** —— 连接媒体服务器，多源聚合浏览、按服务器自带媒体库分类
+- **文件浏览源** —— 本机文件夹 / WebDAV / SMB / DLNA，免登录直接扫描播放，支持文件夹层级浏览
+- **TMDB 刮削** —— 文件源的电影/剧集自动匹配海报、简介、评分、演职人员（填入 TMDB Key 即可）
+- **智能整理** —— 分集自动聚合成剧集、系列电影（如指环王）按 TMDB 系列归成合集、可手动组成/解散/拆分
+
+### ▶️ 播放
+- **外部播放器** —— mpv / IINA / VLC / PotPlayer，本地解码**不转码**，NAS / 服务器零转码负载
+- **自带 mpv** —— 内置 mpv（含 [uosc](https://github.com/tomasklaen/uosc) 现代界面 + 中文菜单 + 跳过片头片尾），开箱即用无需另装
+- **音轨 / 字幕预选** —— 详情页直接选好音轨、字幕再播，不用进播放器切（mpv / VLC / IINA）
+- **整季连播** —— 剧集自动播放下一集
+- **继续观看 + 续播** —— Emby / Jellyfin 与文件源都能记录进度，从上次位置接着看
+
+### 🔗 Trakt 集成
+- **自动同步观看记录** —— 用 mpv 播放时自动打点（scrobble），看完自动标记「已看」
+- **想看 / 评分 / 收藏 / 推荐 / 观看历史** —— 在软件内查看你的 Trakt 列表与个性化推荐
+- **一键回推** —— 详情页直接加入想看、加入收藏、给影片评分，写回 Trakt
+
+### 🎨 界面
+- **精致 UI** —— 海报墙、精选推荐轮播（可换一批）、详情页、演职人员发现作品、多媒体源切换
+- **多主题** —— 多种强调色 + 亮 / 暗 / 跟随系统，自绘无边框标题栏
+- **跨平台** —— Windows / macOS / Linux 桌面客户端
 
 ## 📥 下载
 
@@ -40,13 +57,16 @@ sudo xattr -cr /Applications/NekoPlayer.app
 ## 🚀 使用
 
 1. 启动后进入主页，点击左侧 **媒体源 → 添加媒体源**
-2. 选择 **Emby**，填入服务器地址、账号、密码，点击连接
+2. 选 **Emby / Jellyfin** 填服务器地址 + 账号密码；或选 **本机 / WebDAV / SMB / DLNA** 文件源填连接信息（免登录）
 3. 回到媒体库浏览影音，点 **播放**，或选 **mpv / IINA / VLC** 等按钮用指定播放器打开
-4. 在 **设置** 里可自定义：默认播放器、各播放器程序路径、主题色、字幕样式等
+4. 在 **设置** 里可配置：默认播放器、各播放器程序路径、主题色、字幕样式、**TMDB API Key**（文件源刮削）、**连接 Trakt**（观看记录同步）
+
+> 💡 文件源要显示海报 / 信息，需在设置里填 TMDB v3 API Key（[免费申请](https://www.themoviedb.org/settings/api)）。
+> Trakt 自动同步仅在用 **mpv** 播放时生效。
 
 ## 🛠️ 技术栈
 
-Vue 3 · Vite · TypeScript · Vue Router · Electron · hls.js
+Vue 3 · Vite · TypeScript · Vue Router · Electron
 
 ## 💻 本地开发
 
@@ -72,6 +92,7 @@ git push origin v0.1.0
 - [mpv](https://mpv.io/) —— 强大的开源媒体播放器
 - [uosc](https://github.com/tomasklaen/uosc) —— mpv 的现代化界面
 - [Emby](https://emby.media/) · [Jellyfin](https://jellyfin.org/) —— 媒体服务器
+- [TMDB](https://www.themoviedb.org/) —— 影视元数据 · [Trakt](https://trakt.tv/) —— 观看记录同步
 
 ---
 

@@ -311,7 +311,7 @@ function play(item: MediaItem) {
   overflow: hidden;
   border-radius: var(--r-xl);
 }
-/* 换一批精选 */
+/* 换一批精选：和左右切换按钮一样，平时隐藏、悬浮 Hero 才显示 */
 .library__hero-refresh {
   position: absolute;
   top: 22px;
@@ -329,7 +329,11 @@ function play(item: MediaItem) {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--r-pill);
   backdrop-filter: var(--blur);
-  transition: background var(--dur) var(--ease);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.library__hero:hover .library__hero-refresh {
+  opacity: 1;
 }
 .library__hero-refresh:hover {
   background: rgba(0, 0, 0, 0.72);

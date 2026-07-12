@@ -30,7 +30,9 @@ export interface NekoNative {
     startSec?: number,
     emby?: NekoEmbyProgress,
     tracks?: { aid?: number; sid?: number | 'no' },
-    scrobble?: { token: string; clientId: string; item: Record<string, unknown>; runtime: number }
+    scrobble?: { token: string; clientId: string; item: Record<string, unknown>; runtime: number },
+    /** 文件源续播/继续观看：mpv 退出时按此路径回传本地进度（走 onFileProgress） */
+    fileKey?: string
   ): Promise<boolean>
   /** 唤起系统外部播放器（iina/vlc/potplayer），可预选音轨/字幕（IINA/VLC 生效，PotPlayer 用自身菜单） */
   playExternal(
@@ -42,6 +44,8 @@ export interface NekoNative {
   ): Promise<boolean>
   /** 外部播放结束后主进程回调（带刚播放的 itemId），前端据此轻量刷新进度 */
   onPlaybackEnded(cb: (itemId?: string) => void): void
+  /** 文件源播放结束后主进程回传本地进度（供续播/继续观看） */
+  onFileProgress(cb: (payload: { key: string; pos: number; pct: number }) => void): void
   /** 读持久化存储（同步，供模块初始化时用）；无值返回 null */
   storeGet(key: string): string | null
   /** 写持久化存储（异步、去抖落盘） */

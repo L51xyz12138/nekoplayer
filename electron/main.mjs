@@ -123,8 +123,9 @@ async function traktScrobble(action, scrobble, progress) {
 
 // 通过 mpv IPC：①跟踪播放位置退出时回传 Emby 进度；②文件加载后强制应用详情页预选的音轨/字幕
 // （用户自带 mpv 常有 sub-select/trackselect 脚本在 file-loaded 自动选轨，会盖掉命令行的 --aid/--sid，
-//   故在脚本选完后再经 IPC 设回一次）；③Trakt scrobble（开播 start、退出 stop 带进度%）
-function trackMpvProgress(socketPath, emby, tracks, scrobble) {
+//   故在脚本选完后再经 IPC 设回一次）；③Trakt scrobble（开播 start、退出 stop 带进度%）；
+// ④文件源本地进度（fileKey）：退出时回传 {pos,pct} 供续播/继续观看
+function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
   let lastPos = 0
   let lastPct = 0
   let scrobbleStarted = false
@@ -157,12 +158,12 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble) {
         const total = scrobble?.runtime || 0
         return total > 0 && lastPos > 0 ? Math.min(100, (lastPos / total) * 100) : 0
       }
-      // Emby 上报进度 或 Trakt scrobble（退出算进度）都需要定时读位置
+      // Emby 上报进度 / Trakt scrobble / 文件源本地进度 都需要定时读位置
       const timer =
-        emby || scrobble
+        emby || scrobble || fileKey
           ? setInterval(() => {
               send(['get_property', 'time-pos'])
-              if (scrobble) send(['get_property', 'percent-pos'], 3)
+              if (scrobble || fileKey) send(['get_property', 'percent-pos'], 3)
               if (emby && lastPos > 0) reportMpvProgress(emby, lastPos)
             }, 3000)
           : null
@@ -200,6 +201,10 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble) {
         if (timer) clearInterval(timer)
         // Trakt：退出即 stop，进度≥80% Trakt 自动标记已看、1–79% 存为暂停位
         if (scrobble && scrobbleStarted) void traktScrobble('stop', scrobble, progressPct())
+        // 文件源：回传本地进度（pos 秒 + pct 0-1），供续播/继续观看
+        if (fileKey && mainWin && !mainWin.isDestroyed()) {
+          mainWin.webContents.send('file-progress', { key: fileKey, pos: lastPos, pct: lastPct / 100 })
+        }
         if (!emby) return
         reportMpvStopped(emby, lastPos)
         // 延迟一下等 Emby 处理完 Stopped，再通知前端刷新，拉到最新进度
@@ -292,7 +297,7 @@ function mpvSettingArgs() {
 
 // 渲染进程请求用 mpv 播放（items: [{ url, title }]）
 ipcMain.handle('play-mpv', (_e, payload) => {
-  const { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble } = payload || {}
+  const { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey } = payload || {}
   const list = Array.isArray(items) ? items : []
   if (!list.length) return false
 
@@ -387,9 +392,9 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     proc.on('exit', () => {
       if (mpvProc === proc) mpvProc = null
     })
-    if (emby || tracks || scrobble) {
-      // emby → 进度回传；tracks → 文件加载后强制应用预选音轨/字幕；scrobble → Trakt 打点
-      trackMpvProgress(ipcSocket, emby, tracks, scrobble)
+    if (emby || tracks || scrobble || fileKey) {
+      // emby → 进度回传；tracks → 强制预选轨道；scrobble → Trakt 打点；fileKey → 文件源本地进度回传
+      trackMpvProgress(ipcSocket, emby, tracks, scrobble, fileKey)
     }
     return true
   } catch (err) {

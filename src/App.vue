@@ -5,7 +5,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import { useSettings } from '@/composables/useSettings'
 import { useHotkeys } from '@/composables/useHotkeys'
 
-const { loadFromEmby, refreshAfterPlayback } = useLibrary()
+const { loadFromEmby, refreshAfterPlayback, applyFileProgress } = useLibrary()
 
 // 初始化并应用已保存的设置（主题色等）
 useSettings()
@@ -18,6 +18,8 @@ onMounted(() => {
   loadFromEmby()
   // 外部播放器结束后，主进程通知前端「轻量刷新」（只刷继续观看+这条进度，不整库重拉）
   window.nekoNative?.onPlaybackEnded((itemId) => refreshAfterPlayback(itemId))
+  // 文件源用 mpv 播放结束后，主进程回传本地进度 → 存本地 + 进「继续观看」/续播
+  window.nekoNative?.onFileProgress((p) => applyFileProgress(p))
 })
 </script>
 

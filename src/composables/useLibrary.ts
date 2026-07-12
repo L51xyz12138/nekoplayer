@@ -443,6 +443,93 @@ function saveMetaOverride(id: string, data: Partial<MediaItem>) {
   saveCache(state.items)
 }
 
+// ---- 文件源本地进度（续播 + 继续观看）：文件源无服务器进度，用 mpv 回传的位置按文件路径本地记 ----
+const FILE_PROGRESS_KEY = 'neko-file-progress'
+type FileProgressEntry = { pos: number; pct: number; at: number } // pos 秒、pct 0-1、at 时间戳
+const DONE_PCT = 0.95 // ≥ 视为看完（清进度、不再续播/继续观看）
+const MIN_PCT = 0.01 // < 视为没看，忽略
+function loadFileProgress(): Record<string, FileProgressEntry> {
+  try {
+    const raw = pget(FILE_PROGRESS_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, FileProgressEntry>) : {}
+  } catch {
+    return {}
+  }
+}
+const fileProgress: Record<string, FileProgressEntry> = loadFileProgress()
+function saveFileProgress() {
+  pset(FILE_PROGRESS_KEY, JSON.stringify(fileProgress))
+}
+
+/** 取某文件的续播秒数（供播放时 seek）；无记录或已看完则 0 */
+function fileResumeSec(path?: string): number {
+  const p = path ? fileProgress[path] : undefined
+  return p && p.pct < DONE_PCT ? Math.floor(p.pos) : 0
+}
+
+/** 把已存的本地进度套到文件条目：电影→item.progress；剧集→分集 progress/watched + nextUp（含看完→下一集）+ lastPlayed */
+function applyStoredFileProgress(item: MediaItem) {
+  if (item.type === 'series' && item.seasons) {
+    const eps: Episode[] = item.seasons.flatMap((s) => s.episodes) // 已按季/集有序
+    let lastAt = 0
+    let lastIdx = -1
+    let lastPct = 0
+    eps.forEach((e, idx) => {
+      const p = e.localPath ? fileProgress[e.localPath] : undefined
+      if (!p) return
+      e.progress = Math.min(1, p.pct)
+      e.watched = p.pct >= DONE_PCT
+      if (p.at >= lastAt) {
+        lastAt = p.at
+        lastIdx = idx
+        lastPct = p.pct
+      }
+    })
+    // 续看目标：最近这集没看完→续它；看完了→它之后第一个没看的集（都看完/无记录则 nextUp 清空、移出继续观看）
+    let target: Episode | undefined
+    if (lastIdx >= 0) {
+      target = lastPct < DONE_PCT ? eps[lastIdx] : eps.slice(lastIdx + 1).find((e) => !e.watched)
+    }
+    if (target) {
+      item.nextUp = {
+        episodeId: target.id,
+        season: target.season,
+        episode: target.episode,
+        title: target.title,
+        progress: target.progress && target.progress < 1 ? target.progress : undefined,
+        stillUrl: target.stillUrl
+      }
+      item.lastPlayed = lastAt
+    } else {
+      item.nextUp = undefined
+    }
+  } else if (item.localPath) {
+    const p = fileProgress[item.localPath]
+    item.progress = p && p.pct > MIN_PCT && p.pct < DONE_PCT ? p.pct : undefined
+    if (p) item.lastPlayed = p.at
+  }
+}
+
+/** 主进程回传的文件进度：存盘 + 即时更新库内响应式条目（进「继续观看」/续播；看完的剧集会推进到下一集） */
+function applyFileProgress(payload: { key: string; pos: number; pct: number }) {
+  const { key, pos, pct } = payload || {}
+  if (!key || typeof pct !== 'number' || pct < MIN_PCT) return // 太短忽略
+  // 一律存（含看完 ≥DONE_PCT）——剧集靠「已看」记录推进到下一集；电影靠 progress 是否在区间内决定去留
+  fileProgress[key] = { pos, pct, at: Date.now() }
+  saveFileProgress()
+  for (const m of state.items) {
+    if (m.type !== 'series' && m.localPath === key) {
+      m.progress = pct >= DONE_PCT ? undefined : pct
+      m.lastPlayed = Date.now()
+      return
+    }
+    if (m.type === 'series' && m.seasons?.some((s) => s.episodes.some((e) => e.localPath === key))) {
+      applyStoredFileProgress(m) // 重算分集进度 + nextUp（含看完→下一集）
+      return
+    }
+  }
+}
+
 function tmdbCfg(): TmdbConfig {
   const s = useSettings().settings
   return {
@@ -541,7 +628,10 @@ let lastRawFileItems: MediaItem[] = []
 function reaggregateFiles() {
   const embyItems = state.items.filter((m) => !isFileItem(m))
   const aggregated = aggregateFileItems(lastRawFileItems)
-  for (const m of aggregated) applyOverride(m)
+  for (const m of aggregated) {
+    applyOverride(m)
+    applyStoredFileProgress(m)
+  }
   state.items = [...embyItems, ...aggregated]
   regroupTmdbCollections()
   saveCache(state.items)
@@ -1395,9 +1485,12 @@ async function appendFileSourceItems() {
     const fileItems = await loadFileSourceItems()
     lastRawFileItems = fileItems // 存原始条目，供手动分组后免重扫重聚合
     const embyItems = state.items.filter((m) => !isFileItem(m))
-    // 把剧集分集聚合成剧集条目，套上手动覆盖（覆盖优先），再并入库
+    // 把剧集分集聚合成剧集条目，套上手动覆盖（覆盖优先）+ 本地续播进度，再并入库
     const aggregated = aggregateFileItems(fileItems)
-    for (const m of aggregated) applyOverride(m)
+    for (const m of aggregated) {
+      applyOverride(m)
+      applyStoredFileProgress(m)
+    }
     state.items = [...embyItems, ...aggregated]
     regroupTmdbCollections() // 用缓存里的所属系列信息即时聚合系列电影（未刮到的等 scrapeFileItems 补）
     saveCache(state.items)
@@ -1596,6 +1689,8 @@ export function useLibrary() {
     clearLibrary,
     loadFromEmby,
     refreshAfterPlayback,
+    fileResumeSec,
+    applyFileProgress,
     loadSeasons,
     saveMetaOverride,
     scrapeByName,

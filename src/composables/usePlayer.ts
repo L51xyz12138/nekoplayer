@@ -190,11 +190,14 @@ function playFile(
   if (!native?.playMpv) return
   const { settings } = useSettings()
   player = player || settings.playerMode
+  // 从本地记录的上次位置续播（文件源无服务器进度，靠 useLibrary 的本地进度）
+  const startSec = useLibrary().fileResumeSec(filePath)
   if (player === 'mpv') {
-    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', 0, undefined, tracks, scrobble)
+    // 末位 filePath 作 fileKey：mpv 退出时按它回传进度，用于「继续观看」/续播
+    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', startSec, undefined, tracks, scrobble, filePath)
   } else if (native.playExternal) {
     const key = player.toLowerCase()
-    native.playExternal(key, filePath, settings.playerPaths[key] || '', 0, tracks)
+    native.playExternal(key, filePath, settings.playerPaths[key] || '', startSec, tracks)
   }
 }
 
