@@ -443,6 +443,103 @@ function saveMetaOverride(id: string, data: Partial<MediaItem>) {
   saveCache(state.items)
 }
 
+// ---- 在线下载的字幕（assrt）：按文件 id（local:<path>，电影/分集通用）本地记，聚合时并入 subtitles ----
+const MANUAL_SUBS_KEY = 'neko-manual-subs'
+function loadManualSubs(): Record<string, string[]> {
+  try {
+    const raw = pget(MANUAL_SUBS_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, string[]>) : {}
+  } catch {
+    return {}
+  }
+}
+const manualSubs: Record<string, string[]> = loadManualSubs()
+
+// 字幕友好名（下载时的字幕标题）：subtitles 存的是本地路径（hash 文件名），另存 path→显示名，UI 才不显示乱码文件名
+const SUB_LABELS_KEY = 'neko-sub-labels'
+function loadSubLabels(): Record<string, string> {
+  try {
+    const raw = pget(SUB_LABELS_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+const subLabels: Record<string, string> = loadSubLabels()
+
+/** 字幕的显示名：优先下载时记的标题，否则取文件名（去查询串、解码）——扫到的同名字幕本就叫得清楚 */
+function subLabel(path: string): string {
+  if (subLabels[path]) return subLabels[path]
+  const base = (path.split('?')[0].split(/[/\\]/).pop() || path).trim()
+  try {
+    return decodeURIComponent(base)
+  } catch {
+    return base
+  }
+}
+
+/** 把手动下载的字幕并进条目/分集的 subtitles（去重）；在聚合之后调用，覆盖同步（不改 mtime） */
+function applyManualSubs(item: MediaItem) {
+  const own = manualSubs[item.id]
+  if (own?.length) item.subtitles = [...new Set([...(item.subtitles ?? []), ...own])]
+  for (const s of item.seasons ?? [])
+    for (const ep of s.episodes) {
+      const es = manualSubs[ep.id]
+      if (es?.length) ep.subtitles = [...new Set([...(ep.subtitles ?? []), ...es])]
+    }
+}
+
+/** 记录一条下载好的本地字幕路径（按文件 id：电影=条目 id、分集=分集 id），持久化并即时套到响应式条目/分集 */
+function addManualSub(fileId: string, subPath: string, name?: string) {
+  const list = manualSubs[fileId] ?? (manualSubs[fileId] = [])
+  if (!list.includes(subPath)) list.push(subPath)
+  pset(MANUAL_SUBS_KEY, JSON.stringify(manualSubs))
+  if (name) {
+    subLabels[subPath] = name // 存字幕标题，UI 显示用（否则显示 hash 文件名）
+    pset(SUB_LABELS_KEY, JSON.stringify(subLabels))
+  }
+  // 即时更新库里的响应式对象（电影=条目本身；分集=在某剧 seasons 里找）
+  const movie = getById(fileId)
+  if (movie) {
+    movie.subtitles = [...new Set([...(movie.subtitles ?? []), subPath])]
+    return
+  }
+  for (const it of state.items)
+    for (const s of it.seasons ?? [])
+      for (const ep of s.episodes)
+        if (ep.id === fileId) {
+          ep.subtitles = [...new Set([...(ep.subtitles ?? []), subPath])]
+          return
+        }
+}
+
+/** 移除一条外挂字幕（下载的会从持久化里删、重启不再挂；扫描来的仅本次移除、重扫会回来） */
+function removeManualSub(fileId: string, subPath: string) {
+  const list = manualSubs[fileId]
+  if (list) {
+    const i = list.indexOf(subPath)
+    if (i >= 0) list.splice(i, 1)
+    if (!list.length) delete manualSubs[fileId]
+    pset(MANUAL_SUBS_KEY, JSON.stringify(manualSubs))
+  }
+  if (subLabels[subPath]) {
+    delete subLabels[subPath]
+    pset(SUB_LABELS_KEY, JSON.stringify(subLabels))
+  }
+  const movie = getById(fileId)
+  if (movie?.subtitles) {
+    movie.subtitles = movie.subtitles.filter((s) => s !== subPath)
+    return
+  }
+  for (const it of state.items)
+    for (const s of it.seasons ?? [])
+      for (const ep of s.episodes)
+        if (ep.id === fileId && ep.subtitles) {
+          ep.subtitles = ep.subtitles.filter((x) => x !== subPath)
+          return
+        }
+}
+
 // ---- 文件源本地进度（续播 + 继续观看）：文件源无服务器进度，用 mpv 回传的位置按文件路径本地记 ----
 const FILE_PROGRESS_KEY = 'neko-file-progress'
 type FileProgressEntry = { pos: number; pct: number; at: number } // pos 秒、pct 0-1、at 时间戳
@@ -630,6 +727,7 @@ function reaggregateFiles() {
   const aggregated = aggregateFileItems(lastRawFileItems)
   for (const m of aggregated) {
     applyOverride(m)
+    applyManualSubs(m)
     applyStoredFileProgress(m)
   }
   state.items = [...embyItems, ...aggregated]
@@ -1053,6 +1151,7 @@ function mapLocalVideo(v: NekoVideoFile, source: MediaSource): MediaItem {
     cast: [],
     addedAt: v.mtime || Date.now(),
     localPath: v.path,
+    subtitles: v.subs && v.subs.length ? v.subs : undefined,
     folder: v.dir ?? '',
     // 文件源视频无服务器分类，统一归到「其他」库（所有文件源共用一个，避免多个同名 tab）
     libraryId: 'file:other',
@@ -1203,6 +1302,7 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
           overview: '',
           stillSeed: m.id,
           localPath: m.localPath,
+          subtitles: m.subtitles,
           folder: m.folder
         }))
       }
@@ -1244,6 +1344,7 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
       overview: '',
       stillSeed: m.id,
       localPath: m.localPath,
+      subtitles: m.subtitles,
       folder: m.folder
     })
   }
@@ -1312,6 +1413,7 @@ function aggregateFileItems(items: MediaItem[]): MediaItem[] {
             overview: '',
             stillSeed: m.id,
             localPath: m.localPath,
+            subtitles: m.subtitles,
             folder: m.folder
           }))
       }))
@@ -1489,6 +1591,7 @@ async function appendFileSourceItems() {
     const aggregated = aggregateFileItems(fileItems)
     for (const m of aggregated) {
       applyOverride(m)
+      applyManualSubs(m)
       applyStoredFileProgress(m)
     }
     state.items = [...embyItems, ...aggregated]
@@ -1702,6 +1805,9 @@ export function useLibrary() {
     saveManualSeries,
     removeManualSeries,
     disbandToMovies,
+    addManualSub,
+    removeManualSub,
+    subLabel,
     probeFileTech,
     probeFileEpisode,
     loadEmbyTracks,

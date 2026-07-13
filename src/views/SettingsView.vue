@@ -214,6 +214,18 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
             <div class="row__label"><h4>刮削语言</h4><p>匹配到的标题 / 简介语言</p></div>
             <Segmented v-model="tmdbLangLabel" :options="['中文', 'English']" />
           </div>
+          <div class="row">
+            <div class="row__label">
+              <h4>assrt 字幕 Token（在线字幕）</h4>
+              <p>填入后，文件源详情页出现「在线字幕」按钮，可按片名搜索下载字幕（仅 mpv 生效）。字幕服务由 <a href="https://assrt.net" target="_blank" rel="noreferrer">assrt.net</a> 提供；免费注册登录后在用户面板查看 Token（额度 20 次/分）。留空则不启用。</p>
+            </div>
+            <input
+              v-model="settings.assrtToken"
+              class="path-input"
+              placeholder="assrt API Token（留空不启用）"
+              spellcheck="false"
+            />
+          </div>
         </div>
       </section>
 
@@ -370,6 +382,13 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
   margin-top: 4px;
   font-size: 13px;
   color: var(--text-mute);
+}
+.row__label p a {
+  color: var(--accent);
+  font-weight: 600;
+}
+.row__label p a:hover {
+  text-decoration: underline;
 }
 
 .themes {

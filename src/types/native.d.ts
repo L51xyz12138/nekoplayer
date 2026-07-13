@@ -32,7 +32,9 @@ export interface NekoNative {
     tracks?: { aid?: number; sid?: number | 'no' },
     scrobble?: { token: string; clientId: string; item: Record<string, unknown>; runtime: number },
     /** 文件源续播/继续观看：mpv 退出时按此路径回传本地进度（走 onFileProgress） */
-    fileKey?: string
+    fileKey?: string,
+    /** 同名外挂字幕直链（WebDAV/DLNA 等 http 源，mpv 扫不了目录，故显式 --sub-file 挂载） */
+    subs?: string[]
   ): Promise<boolean>
   /** 唤起系统外部播放器（iina/vlc/potplayer），可预选音轨/字幕（IINA/VLC 生效，PotPlayer 用自身菜单） */
   playExternal(
@@ -85,6 +87,8 @@ export interface NekoNative {
   scanDlna(config: Record<string, string>): Promise<{ videos?: NekoVideoFile[]; error?: string }>
   /** 取视频缩略图（自带 mpv 抽帧+缓存），返回 base64 data URL；失败返回 null */
   getThumb(file: string, mpvPath?: string): Promise<string | null>
+  /** 下载在线字幕（assrt 直链）到本地，返回 { path } 可播绝对路径，或 { error } */
+  downloadSub(url: string, name?: string): Promise<{ path?: string; error?: string }>
   /** 检查 mpv 是否可用（传入自定义路径优先）；ok=false 表示需用户填路径 */
   checkMpv(mpvPath?: string): Promise<{ ok: boolean; path: string }>
   /** 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小 + 音轨/字幕轨道列表）；失败返回 null */
@@ -130,6 +134,8 @@ export interface NekoVideoFile {
   mtime: number
   /** 相对于源根的所在文件夹（'/' 分隔，根目录为 ''），供文件夹层级浏览 */
   dir?: string
+  /** 同名外挂字幕直链（http 源扫描时收集，播放时 --sub-file 挂载） */
+  subs?: string[]
 }
 
 declare global {

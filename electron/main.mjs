@@ -18,6 +18,31 @@ const VIDEO_EXT = new Set([
   '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts', '.m2ts',
   '.mpg', '.mpeg', '.rmvb', '.rm', '.3gp', '.vob', '.ogv', '.divx', '.f4v', '.mts'
 ])
+// 同名外挂字幕（供 mpv --sub-file 挂载）。仅文本字幕——VobSub(.idx/.sub) 少见且成对易出歧义，故不收
+const SUB_EXT = new Set(['.srt', '.ass', '.ssa', '.vtt', '.sup'])
+const stripExt = (n) => n.replace(/\.[^.]+$/, '')
+// 把同目录、同基名（或「基名.语言」如 Movie.zh.srt）的字幕直链配给各视频（http 源 mpv 无法自己扫目录）
+function attachSubs(videos, subs) {
+  if (!subs.length) return
+  const byDir = new Map()
+  for (const s of subs) {
+    const d = s.dir || ''
+    if (!byDir.has(d)) byDir.set(d, [])
+    byDir.get(d).push(s)
+  }
+  for (const v of videos) {
+    const pool = byDir.get(v.dir || '')
+    if (!pool) continue
+    const vb = stripExt(v.name).toLowerCase()
+    const matched = pool
+      .filter((s) => {
+        const sb = stripExt(s.name).toLowerCase()
+        return sb === vb || sb.startsWith(vb + '.')
+      })
+      .map((s) => s.path)
+    if (matched.length) v.subs = matched
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = !app.isPackaged
@@ -300,7 +325,7 @@ function mpvSettingArgs() {
 
 // 渲染进程请求用 mpv 播放（items: [{ url, title }]）
 ipcMain.handle('play-mpv', (_e, payload) => {
-  const { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey } = payload || {}
+  const { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey, subs } = payload || {}
   const list = Array.isArray(items) ? items : []
   if (!list.length) return false
 
@@ -354,6 +379,9 @@ ipcMain.handle('play-mpv', (_e, payload) => {
       ]
   // 从上次进度续播
   if (typeof startSec === 'number' && startSec > 0) args.push(`--start=${startSec}`)
+  // 文件源同名外挂字幕（WebDAV/DLNA 等 http 源 mpv 扫不了目录，故扫描时收好、这里显式挂载）
+  // 放在 --sid 之前：外挂轨的 sid 排在自带轨之后，用户预选的自带字幕号不受影响
+  if (Array.isArray(subs)) for (const su of subs) if (su) args.push(`--sub-file=${su}`)
   // 详情页预选的音轨/字幕（覆盖设置里的语言偏好，故放最后）
   if (tracks) {
     if (typeof tracks.aid === 'number') args.push(`--aid=${tracks.aid}`)
@@ -361,6 +389,9 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     // 选了具体字幕时同时开字幕显示——有些 mpv 配置默认 sub-visibility=no，只 --sid 选了却不显示
     else if (typeof tracks.sid === 'number') args.push(`--sid=${tracks.sid}`, '--sub-visibility=yes')
   }
+  // 只挂了外挂字幕、没预选具体字幕轨时也确保字幕可见（某些配置默认 sub-visibility=no）
+  if (Array.isArray(subs) && subs.length && !(tracks && (tracks.sid === 'no' || typeof tracks.sid === 'number')))
+    args.push('--sub-visibility=yes')
 
   let target
   if (list.length === 1) {
@@ -697,6 +728,7 @@ ipcMain.handle('scan-webdav', async (_e, config) => {
   try {
     const client = createClient(url, username ? { username, password } : {})
     const videos = []
+    const subs = [] // 同名外挂字幕（http 源 mpv 扫不了目录，需扫描时收集、播放时 --sub-file 挂）
     // 规范化路径 + 求相对源根的文件夹（供文件夹层级浏览）
     const norm = (p) => ('/' + p).replace(/\/+/g, '/').replace(/\/+$/, '') || '/'
     const rootBase = norm(rootPath || '/')
@@ -717,19 +749,25 @@ ipcMain.handle('scan-webdav', async (_e, config) => {
           // 跳过「自身」条目（部分服务器会把当前目录也列出）以防死循环
           const self = it.filename.replace(/\/+$/, '') === String(dir).replace(/\/+$/, '')
           if (!self) await walk(it.filename, depth + 1)
-        } else if (VIDEO_EXT.has(path.extname(it.basename).toLowerCase())) {
-          videos.push({
-            name: it.basename,
-            // 带 basic auth 的直链，外部播放器可直接播
-            path: client.getFileDownloadLink(it.filename),
-            size: it.size || 0,
-            mtime: it.lastmod ? Date.parse(it.lastmod) : 0,
-            dir: rel
-          })
+        } else {
+          const ext = path.extname(it.basename).toLowerCase()
+          if (VIDEO_EXT.has(ext)) {
+            videos.push({
+              name: it.basename,
+              // 带 basic auth 的直链，外部播放器可直接播
+              path: client.getFileDownloadLink(it.filename),
+              size: it.size || 0,
+              mtime: it.lastmod ? Date.parse(it.lastmod) : 0,
+              dir: rel
+            })
+          } else if (SUB_EXT.has(ext)) {
+            subs.push({ name: it.basename, path: client.getFileDownloadLink(it.filename), dir: rel })
+          }
         }
       }
     }
     await walk(rootPath || '/', 0)
+    attachSubs(videos, subs)
     return { videos }
   } catch (e) {
     return { error: e.message }
@@ -795,6 +833,20 @@ function unescapeXml(s) {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
     .replace(/&amp;/g, '&')
+}
+// 从 DLNA item 块里取字幕直链：sec:CaptionInfoEx 或 protocolInfo 含字幕类型的 <res>（DLNA 把字幕 URL 直接嵌在 item 里）
+function dlnaSubsOf(block) {
+  const subs = []
+  for (const m of block.matchAll(/<sec:CaptionInfoEx\b[^>]*>([^<]+)<\/sec:CaptionInfoEx>/gi)) {
+    subs.push(unescapeXml(m[1].trim()))
+  }
+  for (const m of block.matchAll(/<res\b([^>]*)>([^<]+)<\/res>/gi)) {
+    // protocolInfo 标明是字幕类型（srt/ass/vtt/smi/subrip…）且非视频轨才收
+    if (/srt|ass|ssa|vtt|smi|subrip|subtitle|text\//i.test(m[1]) && !/video/i.test(m[1])) {
+      subs.push(unescapeXml(m[2].trim()))
+    }
+  }
+  return [...new Set(subs)]
 }
 // 从设备描述 XML 里取 friendlyName + ContentDirectory 的绝对 controlURL
 async function parseDlnaDescription(location) {
@@ -934,14 +986,18 @@ async function browseDlna(controlUrl, objectId, out, depth, dirPath = '') {
     for (const it of r.didl.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
       const block = it[1]
       if (!/videoItem/i.test(block.match(/<upnp:class>([^<]+)<\/upnp:class>/i)?.[1] || '')) continue
-      const res = block.match(/<res\b([^>]*)>([^<]+)<\/res>/i)
+      // 取第一个「视频」res 作播放直链（跳过字幕 res，否则会把字幕当视频）
+      const resList = [...block.matchAll(/<res\b([^>]*)>([^<]+)<\/res>/gi)]
+      const res = resList.find((r) => !/srt|ass|ssa|vtt|smi|subrip|subtitle|text\//i.test(r[1])) || resList[0]
       if (!res) continue
+      const epSubs = dlnaSubsOf(block)
       out.push({
         name: unescapeXml(block.match(/<dc:title>([^<]*)<\/dc:title>/i)?.[1] || '视频'),
         path: unescapeXml(res[2].trim()),
         size: parseInt(res[1].match(/size=["'](\d+)["']/i)?.[1] || '0', 10),
         mtime: 0,
-        dir: dirPath
+        dir: dirPath,
+        ...(epSubs.length ? { subs: epSubs } : {})
       })
       if (out.length >= 4000) return
     }
@@ -965,6 +1021,32 @@ ipcMain.handle('scan-dlna', async (_e, config) => {
     // 同一视频可能出现在多个容器（如「所有视频」+「文件夹」），按直链去重
     const seen = new Set()
     return { videos: out.filter((v) => !seen.has(v.path) && seen.add(v.path)) }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
+
+// ---------- 在线字幕下载（assrt 直链 → 存到 userData/subs，供 mpv --sub-file 挂载）----------
+const SUBS_DIR = path.join(app.getPath('userData'), 'subs')
+try {
+  mkdirSync(SUBS_DIR, { recursive: true })
+} catch {
+  /* ignore */
+}
+// 下载字幕直链、按内容 hash 存本地文件，返回可播的绝对路径（存本地而非直接给 mpv URL：稳定、可离线重播、直链可能过期）
+ipcMain.handle('download-sub', async (_e, payload) => {
+  const { url, name } = payload || {}
+  if (!url) return { error: '缺少字幕地址' }
+  try {
+    // assrt 非 Cloudflare，但 undici 无默认 UA，个别源要 UA，加上更稳
+    const res = await fetch(url, { headers: { 'User-Agent': 'NekoPlayer' } })
+    if (!res.ok) return { error: `下载失败（HTTP ${res.status}）` }
+    const buf = Buffer.from(await res.arrayBuffer())
+    // 扩展名从文件名/URL 推断，默认 .srt
+    const ext = (String(name || url).match(/\.(srt|ass|ssa|vtt|sup)(?:\?|$)/i)?.[1] || 'srt').toLowerCase()
+    const file = path.join(SUBS_DIR, createHash('md5').update(url).digest('hex') + '.' + ext)
+    writeFileSync(file, buf)
+    return { path: file }
   } catch (e) {
     return { error: e.message }
   }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, Pencil, Unlink, Film } from 'lucide-vue-next'
+import { ArrowLeft, Pencil, Unlink, Film, Captions, X } from 'lucide-vue-next'
 import DetailHero from '@/components/detail/DetailHero.vue'
 import EditMetaDialog from '@/components/detail/EditMetaDialog.vue'
+import SubtitleSearchDialog from '@/components/detail/SubtitleSearchDialog.vue'
 import EpisodeList from '@/components/detail/EpisodeList.vue'
 import CastRow from '@/components/detail/CastRow.vue'
 import MediaTechInfo from '@/components/detail/MediaTechInfo.vue'
@@ -15,6 +16,7 @@ import PosterCard from '@/components/library/PosterCard.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSources } from '@/composables/useSources'
 import { usePlayer, type PlayTracks } from '@/composables/usePlayer'
+import { assrtEnabled } from '@/api/assrt'
 import type { Episode, MediaItem, Person } from '@/types/media'
 
 const props = defineProps<{ id: string }>()
@@ -30,6 +32,9 @@ const {
   clearMetaOverride,
   removeManualSeries,
   disbandToMovies,
+  addManualSub,
+  removeManualSub,
+  subLabel,
   probeFileTech,
   probeFileEpisode,
   loadEmbyTracks,
@@ -91,6 +96,21 @@ const epFocused = ref(false) // 用户是否点过某集（点了简介才切成
 function onSelectEp(ep: Episode) {
   selectedEp.value = ep
   epFocused.value = true
+}
+
+// 在线字幕（assrt）：仅文件源、且配了 token 时可用
+const subAvailable = computed(() => isFileItem.value && assrtEnabled())
+const subOpen = ref(false)
+// 搜索/下载目标：剧集用当前聚焦的那一集（每集一个文件），电影用条目本身
+const subEpisode = computed(() => (item.value?.type === 'series' ? selectedEp.value : undefined))
+const subFileId = computed(() => subEpisode.value?.id ?? item.value?.id)
+// 当前条目/聚焦集已挂载的外挂字幕（下载的 + WebDAV/DLNA 扫到的），供确认「挂上了没」
+const displaySubs = computed(() => (subEpisode.value ?? item.value)?.subtitles ?? [])
+function onSubAdd(p: { path: string; name: string }) {
+  if (subFileId.value) addManualSub(subFileId.value, p.path, p.name)
+}
+function onRemoveSub(path: string) {
+  if (subFileId.value) removeManualSub(subFileId.value, path)
 }
 // 简介：点过单集才显示该集简介，否则整部剧的（界面默认不变）；文件信息/轨道则始终跟随聚焦集
 const displayOverview = computed(() =>
@@ -272,6 +292,9 @@ function onPerson(person: Person) {
         <button v-if="isManualSeries" class="detail__edit" title="解散为单个视频" @click="ungroup">
           <Unlink :size="15" /> 解散剧集
         </button>
+        <button v-if="subAvailable" class="detail__edit" title="在线搜索并下载字幕（assrt）" @click="subOpen = true">
+          <Captions :size="16" /> 在线字幕
+        </button>
         <button class="detail__edit" title="编辑元数据" @click="editOpen = true">
           <Pencil :size="16" /> 编辑
         </button>
@@ -318,6 +341,17 @@ function onPerson(person: Person) {
           />
         </template>
 
+        <!-- 外挂字幕（下载的 + WebDAV/DLNA 扫到的同名字幕）：确认挂载 + 可移除；播放时 mpv 自动加载首条 -->
+        <div v-if="displaySubs.length" class="detail__subs">
+          <span class="detail__subs-label"><Captions :size="15" /> 外挂字幕</span>
+          <div class="detail__subs-list">
+            <span v-for="s in displaySubs" :key="s" class="detail__sub" :title="s">
+              <span class="detail__sub-name">{{ subLabel(s) }}</span>
+              <button class="detail__sub-x" title="移除此字幕" @click="onRemoveSub(s)"><X :size="12" /></button>
+            </span>
+          </div>
+        </div>
+
         <TraktActions :item="item" />
         <EpisodeList
           v-if="item.type === 'series' && item.seasons"
@@ -346,6 +380,13 @@ function onPerson(person: Person) {
       @close="editOpen = false"
       @save="onSaveMeta"
       @reset="onResetMeta"
+    />
+    <SubtitleSearchDialog
+      :open="subOpen"
+      :item="item || null"
+      :episode="subEpisode"
+      @close="subOpen = false"
+      @add="onSubAdd"
     />
   </div>
 
@@ -493,6 +534,60 @@ function onPerson(person: Person) {
   color: var(--text-mute);
   word-break: break-all;
   user-select: text;
+}
+
+.detail__subs {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.detail__subs-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding-top: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.detail__subs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.detail__sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 340px;
+  padding: 5px 6px 5px 11px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+.detail__sub-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail__sub-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--text-mute);
+  transition: background var(--dur), color var(--dur);
+}
+.detail__sub-x:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 .detail-missing {

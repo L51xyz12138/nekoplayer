@@ -25,6 +25,8 @@
 - **外部播放器** —— mpv / IINA / VLC / PotPlayer，本地解码**不转码**，NAS / 服务器零转码负载
 - **自带 mpv** —— 内置 mpv（含 [uosc](https://github.com/tomasklaen/uosc) 现代界面 + 中文菜单 + 跳过片头片尾），开箱即用无需另装
 - **音轨 / 字幕预选** —— 详情页直接选好音轨、字幕再播，不用进播放器切（mpv / VLC / IINA）
+- **外挂字幕自动加载** —— 同名字幕（含 `影片.zh.srt`）自动挂载，WebDAV / DLNA 网络源也能识别；本机字幕单放子文件夹（sub/subs/subtitles）也自动扫到
+- **在线字幕下载** —— 文件源详情页「在线字幕」，按片名从射手网（assrt）搜索下载、自动挂载（仅 mpv；需在设置填免费的 assrt Token）
 - **整季连播** —— 剧集自动播放下一集
 - **继续观看 + 续播** —— Emby / Jellyfin 与文件源都能记录进度，从上次位置接着看
 
@@ -94,6 +96,7 @@ git push origin v0.1.0
 - [uosc](https://github.com/tomasklaen/uosc) —— mpv 的现代化界面
 - [Emby](https://emby.media/) · [Jellyfin](https://jellyfin.org/) —— 媒体服务器
 - [TMDB](https://www.themoviedb.org/) —— 影视元数据 · [Trakt](https://trakt.tv/) —— 观看记录同步
+- 字幕服务由 [assrt.net](https://assrt.net)（射手网）提供 —— 在线字幕搜索下载
 
 ---
 

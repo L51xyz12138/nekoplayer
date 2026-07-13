@@ -5,8 +5,8 @@ contextBridge.exposeInMainWorld('nekoNative', {
   isElectron: true,
   platform: process.platform,
   // mpv 本地解码播放（items + 起始索引 + 自定义 mpv 路径），支持整季播放列表
-  playMpv: (items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey) =>
-    ipcRenderer.invoke('play-mpv', { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey }),
+  playMpv: (items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey, subs) =>
+    ipcRenderer.invoke('play-mpv', { items, title, startIndex, mpvPath, startSec, emby, tracks, scrobble, fileKey, subs }),
   // 唤起系统外部播放器（iina / vlc / potplayer），支持自定义程序路径 + 起始秒数 + 预选音轨/字幕
   playExternal: (player, url, appPath, startSec, tracks) =>
     ipcRenderer.invoke('play-external', { player, url, appPath, startSec, tracks }),
@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('nekoNative', {
   discoverDlna: () => ipcRenderer.invoke('discover-dlna'),
   scanDlna: (config) => ipcRenderer.invoke('scan-dlna', config),
   getThumb: (file, mpvPath) => ipcRenderer.invoke('get-thumb', { file, mpvPath }),
+  // 下载在线字幕（assrt 直链）到本地，返回可播绝对路径
+  downloadSub: (url, name) => ipcRenderer.invoke('download-sub', { url, name }),
   checkMpv: (mpvPath) => ipcRenderer.invoke('check-mpv', mpvPath),
   // 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小）
   probeMedia: (file, mpvPath) => ipcRenderer.invoke('probe-media', { file, mpvPath }),

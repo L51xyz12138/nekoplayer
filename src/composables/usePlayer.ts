@@ -87,7 +87,7 @@ async function play(item: MediaItem, episode?: Episode, tracks?: PlayTracks) {
   // 本机存储视频：直接播文件，无服务器进度同步（但可 scrobble 到 Trakt）
   if (item.localPath) {
     const scrobble = await buildScrobble(fileTraktItem(item), item.runtime)
-    playFile(item.localPath, item.title, undefined, tracks, scrobble)
+    playFile(item.localPath, item.title, undefined, tracks, scrobble, item.subtitles)
     return
   }
   const player = useSettings().settings.playerMode
@@ -102,13 +102,13 @@ async function playWith(item: MediaItem, episode: Episode | undefined, player: s
   // 文件源剧集分集：播分集文件
   if (episode?.localPath) {
     const scrobble = await buildScrobble(fileTraktItem(item, episode), episode.runtime || item.runtime)
-    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player, tracks, scrobble)
+    playFile(episode.localPath, `${item.title} · S${episode.season}E${episode.episode}`, player, tracks, scrobble, episode.subtitles)
     return
   }
   // 文件源电影：直接用指定播放器播文件（无服务器进度同步）
   if (item.localPath) {
     const scrobble = await buildScrobble(fileTraktItem(item), item.runtime)
-    playFile(item.localPath, item.title, player, tracks, scrobble)
+    playFile(item.localPath, item.title, player, tracks, scrobble, item.subtitles)
     return
   }
   const s = useSources().sessionOf(item.sourceId)
@@ -184,7 +184,8 @@ function playFile(
   title: string,
   player?: string,
   tracks?: PlayTracks,
-  scrobble?: ScrobbleInfo
+  scrobble?: ScrobbleInfo,
+  subs?: string[]
 ) {
   const native = window.nekoNative
   if (!native?.playMpv) return
@@ -193,8 +194,10 @@ function playFile(
   // 从本地记录的上次位置续播（文件源无服务器进度，靠 useLibrary 的本地进度）
   const startSec = useLibrary().fileResumeSec(filePath)
   if (player === 'mpv') {
-    // 末位 filePath 作 fileKey：mpv 退出时按它回传进度，用于「继续观看」/续播
-    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', startSec, undefined, tracks, scrobble, filePath)
+    // subs 可能是 Vue 响应式数组，直接过 IPC 会报「object could not be cloned」→ 展开成普通数组再传
+    const subList = subs && subs.length ? [...subs] : undefined
+    // 末位 filePath 作 fileKey：mpv 退出时按它回传进度，用于「继续观看」/续播；subList=同名外挂字幕
+    native.playMpv([{ url: filePath, title }], title, 0, settings.playerPaths.mpv || '', startSec, undefined, tracks, scrobble, filePath, subList)
   } else if (native.playExternal) {
     const key = player.toLowerCase()
     native.playExternal(key, filePath, settings.playerPaths[key] || '', startSec, tracks)

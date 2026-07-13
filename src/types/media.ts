@@ -26,6 +26,8 @@ export interface Episode {
   localPath?: string
   /** 文件源分集所在文件夹（供文件夹视图） */
   folder?: string
+  /** 同名外挂字幕直链（http 源，播放时 --sub-file 挂载） */
+  subtitles?: string[]
   /** 观看进度 0-1 */
   progress?: number
   /** 续播位置（Emby ticks，1 秒=10^7）；比 progress 精确，用于 seek */
@@ -105,6 +107,8 @@ export interface MediaItem {
   backdropUrl?: string
   /** 本机存储类源的视频文件绝对路径；有则为本地视频（用外部播放器直接播、封面走 mpv 抽帧） */
   localPath?: string
+  /** 同名外挂字幕直链（WebDAV/DLNA 等 http 源；播放时 --sub-file 挂载，mpv 生效） */
+  subtitles?: string[]
   /** 文件源视频在源内的相对文件夹（'/' 分隔，根为 ''），供文件夹层级浏览 */
   folder?: string
   /** 文件源视频已成功刮削到 TMDB 元数据（有则展示海报/年份/评分，无则展示缩略图） */

@@ -42,6 +42,8 @@ interface Settings {
   tmdbApiBase: string
   /** TMDB 图片基地址（含尺寸段，如 .../w500） */
   tmdbImgBase: string
+  /** assrt 射手网 API token（在线字幕下载）；留空则用内置 token（额度共享，可能受限时填自己的） */
+  assrtToken: string
 }
 
 const DEFAULTS: Settings = {
@@ -62,7 +64,8 @@ const DEFAULTS: Settings = {
   tmdbKey: '',
   tmdbLang: 'zh-CN',
   tmdbApiBase: 'https://api.themoviedb.org/3',
-  tmdbImgBase: 'https://image.tmdb.org/t/p/w500'
+  tmdbImgBase: 'https://image.tmdb.org/t/p/w500',
+  assrtToken: ''
 }
 
 const KEY = 'neko-settings'
