@@ -16,6 +16,7 @@ import PosterCard from '@/components/library/PosterCard.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSources } from '@/composables/useSources'
 import { usePlayer, type PlayTracks } from '@/composables/usePlayer'
+import { useBackground } from '@/composables/useBackground'
 import { assrtEnabled } from '@/api/assrt'
 import type { Episode, MediaItem, Person } from '@/types/media'
 
@@ -45,6 +46,10 @@ const player = usePlayer()
 
 const item = computed(() => getById(props.id))
 
+// 全局海报背景：详情页用 focus（整窗大海报、中间清晰四周模糊）；背景图优先，退回海报
+const { setBackdrop } = useBackground()
+watch(item, (it) => setBackdrop(it?.backdropUrl || it?.posterUrl, 'focus'), { immediate: true })
+
 // 文件源条目才可手动编辑元数据（Emby/Jellyfin 由服务器管理，不在此改）
 const isFileItem = computed(() => {
   const it = item.value
@@ -62,11 +67,13 @@ const filePath = computed(() => item.value?.localPath || item.value?.folder || '
 // 详情页预选的音轨/字幕（仅文件源，探测到多轨时可选）；undefined=默认（跟随设置语言偏好）
 const selAid = ref<number | undefined>(undefined)
 const selSid = ref<number | 'no' | undefined>(undefined)
+const selSubFile = ref<string | undefined>(undefined) // 选中的 Emby 外挂字幕直链
 const selectedTracks = computed<PlayTracks | undefined>(() => {
   const t: PlayTracks = {}
   if (selAid.value !== undefined) t.aid = selAid.value
   if (selSid.value !== undefined) t.sid = selSid.value
-  return t.aid !== undefined || t.sid !== undefined ? t : undefined
+  if (selSubFile.value) t.subFile = selSubFile.value
+  return t.aid !== undefined || t.sid !== undefined || t.subFile ? t : undefined
 })
 
 const editOpen = ref(false)
@@ -177,6 +184,7 @@ watch(
     if (it?.id !== prev?.id) {
       selAid.value = undefined
       selSid.value = undefined
+      selSubFile.value = undefined
       selectedEp.value = undefined
       epFocused.value = false
     }
@@ -216,6 +224,7 @@ watch(selectedEp, (ep) => {
   ensureEpisodeInfo(ep)
   selAid.value = undefined
   selSid.value = undefined
+  selSubFile.value = undefined
 })
 
 // 滚过 Hero 一定距离后，顶栏渐显磨砂背景 + 标题
@@ -338,6 +347,7 @@ function onPerson(person: Person) {
             :tracks="displayTracks"
             v-model:aid="selAid"
             v-model:sid="selSid"
+            v-model:sub-file="selSubFile"
           />
         </template>
 
@@ -399,13 +409,15 @@ function onPerson(person: Person) {
 <style scoped>
 .detail {
   position: relative;
-  height: 100%;
+  /* 抵消 .app__main 的顶部留白 → 大海报顶到窗口最上（悬浮标题栏浮在其上），内容拉通到顶 */
+  margin-top: -44px;
+  height: calc(100% + 44px);
   overflow: hidden;
 }
 
 .detail__topbar {
   position: absolute;
-  top: 0;
+  top: 44px;
   left: 0;
   right: 0;
   z-index: 20;
@@ -416,11 +428,7 @@ function onPerson(person: Person) {
   border-bottom: 1px solid transparent;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.detail__topbar.is-scrolled {
-  background: rgba(11, 12, 17, 0.72);
-  backdrop-filter: var(--blur);
-  border-bottom-color: var(--border);
-}
+/* 滚动时标题栏保持透明（不再变黑条破坏沉浸感）：返回键/操作键各自带底色、标题有阴影，均可读 */
 
 .detail__back {
   display: grid;
@@ -438,12 +446,12 @@ function onPerson(person: Person) {
 .detail__back:hover {
   background: rgba(0, 0, 0, 0.62);
 }
-.detail__topbar.is-scrolled .detail__back {
-  background: var(--surface-2);
-}
 .detail__topbar-title {
   font-size: 17px;
   font-weight: 700;
+  /* 固定亮色 + 阴影：滚动时压在海报/内容上都清晰（不随主题翻转） */
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 1px 12px rgba(0, 0, 0, 0.6);
 }
 .detail__actions {
   margin-left: auto;
@@ -467,9 +475,6 @@ function onPerson(person: Person) {
 }
 .detail__edit:hover {
   background: rgba(0, 0, 0, 0.62);
-}
-.detail__topbar.is-scrolled .detail__edit {
-  background: var(--surface-2);
 }
 
 .detail__scroll {

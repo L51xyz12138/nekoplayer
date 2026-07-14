@@ -15,6 +15,10 @@ export interface NekoEmbyProgress {
   deviceId: string
   itemId: string
   playSessionId: string
+  /** 整季连播的各集 id（顺序与播放列表一致）；mpv 自动换集时按当前 playlist-pos 回传对应集进度 */
+  itemIds?: string[]
+  /** 起播的播放列表索引 */
+  startIndex?: number
 }
 
 export interface NekoNative {
@@ -29,7 +33,7 @@ export interface NekoNative {
     mpvPath?: string,
     startSec?: number,
     emby?: NekoEmbyProgress,
-    tracks?: { aid?: number; sid?: number | 'no' },
+    tracks?: { aid?: number; sid?: number | 'no'; subFile?: string },
     scrobble?: { token: string; clientId: string; item: Record<string, unknown>; runtime: number },
     /** 文件源续播/继续观看：mpv 退出时按此路径回传本地进度（走 onFileProgress） */
     fileKey?: string,
@@ -42,7 +46,7 @@ export interface NekoNative {
     url: string,
     appPath?: string,
     startSec?: number,
-    tracks?: { aid?: number; sid?: number | 'no' }
+    tracks?: { aid?: number; sid?: number | 'no'; subFile?: string }
   ): Promise<boolean>
   /** 外部播放结束后主进程回调（带刚播放的 itemId），前端据此轻量刷新进度 */
   onPlaybackEnded(cb: (itemId?: string) => void): void
@@ -110,6 +114,14 @@ export interface NekoNative {
   } | null>
   /** 亮/暗切换时同步标题栏悬浮窗口按钮区的配色（仅 Windows 生效） */
   setTitlebarTheme(light: boolean): void
+  /** 自绘标题栏：最小化窗口 */
+  windowMinimize(): void
+  /** 自绘标题栏：最大化/还原窗口 */
+  windowMaximize(): void
+  /** 自绘标题栏：关闭窗口 */
+  windowClose(): void
+  /** 窗口最大化状态变化回调（切换最大化/还原图标） */
+  onMaximizeChange(cb: (maximized: boolean) => void): void
 }
 
 /** mpv 探测到的单条音轨/字幕（id 用于 --aid/--sid） */

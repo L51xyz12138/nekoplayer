@@ -939,6 +939,8 @@ async function loadEmbyInfo(target: { tech?: MediaTech; tracks?: MediaTracks }, 
         }
       }
     }
+    // 服务器端外挂字幕（独立字幕流）→ 供详情页预选，播放时 mpv --sub-file 加载
+    if (info.externalSubs.length) tracks.ext = info.externalSubs
     embyTracksCache[targetId] = { tracks, tech }
     target.tracks = tracks
   } catch {

@@ -21,6 +21,7 @@ const props = withDefaults(
 )
 
 const failed = ref(false)
+const loaded = ref(false) // 真图是否已加载（未加载时先显示占位、加载完淡入，避免过滤时卡片空白）
 const localThumb = ref('')
 watch(
   () => props.localPath,
@@ -38,6 +39,11 @@ watch(
 )
 const resolvedSrc = computed(() => props.src || localThumb.value)
 const useImage = computed(() => !!resolvedSrc.value && !failed.value)
+// 换图（如切条目复用组件 / 缩略图异步就绪）时重置加载态，重新走占位→淡入
+watch(resolvedSrc, () => {
+  failed.value = false
+  loaded.value = false
+})
 
 /** FNV-1a 稳定哈希 */
 function hash(str: string): number {
@@ -77,21 +83,13 @@ const shortTitle = computed(() => {
 </script>
 
 <template>
-  <img
-    v-if="useImage"
-    class="poster-img"
-    :src="resolvedSrc"
-    :alt="title"
-    loading="lazy"
-    @error="failed = true"
-  />
-  <svg
-    v-else
-    class="poster-svg"
-    :viewBox="`0 0 ${geo.w} ${geo.h}`"
-    preserveAspectRatio="xMidYMid slice"
-    aria-hidden="true"
-  >
+  <div class="poster-wrap">
+    <svg
+      class="poster-svg"
+      :viewBox="`0 0 ${geo.w} ${geo.h}`"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+    >
     <defs>
       <linearGradient
         :id="`g-${uid}`"
@@ -158,19 +156,43 @@ const shortTitle = computed(() => {
         {{ label }}
       </text>
     </g>
-  </svg>
+    </svg>
+    <!-- 真图铺在占位之上，加载完淡入；未加载/失败时露出下方彩色占位（过滤时卡片不空白） -->
+    <img
+      v-if="useImage"
+      class="poster-img"
+      :class="{ 'is-loaded': loaded }"
+      :src="resolvedSrc"
+      :alt="title"
+      loading="lazy"
+      decoding="async"
+      @load="loaded = true"
+      @error="failed = true"
+    />
+  </div>
 </template>
 
 <style scoped>
-.poster-img {
-  display: block;
+.poster-wrap {
+  position: relative;
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 .poster-svg {
   display: block;
   width: 100%;
   height: 100%;
+}
+.poster-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.poster-img.is-loaded {
+  opacity: 1;
 }
 </style>

@@ -1,7 +1,7 @@
 // Emby / Jellyfin 媒体服务器 API 客户端
 // 动态服务器地址：支持连接任意公网 / 局域网服务器（Electron webSecurity:false 免跨域）
 
-import type { MediaTracks } from '@/types/media'
+import type { MediaExtSub, MediaTracks } from '@/types/media'
 
 const CLIENT_NAME = 'NekoPlayer'
 const DEVICE_NAME = 'NekoPlayer'
@@ -67,8 +67,12 @@ export interface EmbyMediaStream {
   VideoRange?: string
   /** 在所有流里的绝对序号（视频/音频/字幕混排）；排序后各类型自 1 计得到 mpv 轨道号 */
   Index?: number
-  /** 外挂轨道（独立文件，不在 Static 直连流里，mpv 看不到）——预选时需排除 */
+  /** 外挂轨道（独立文件，不在 Static 直连流里）——内封轨预选时排除；外挂字幕单独走 --sub-file */
   IsExternal?: boolean
+  /** 外挂字幕的服务器交付地址（相对，需补 serverUrl + api_key）；mpv --sub-file 用 */
+  DeliveryUrl?: string
+  /** 是否文本字幕（srt/ass/vtt 等；图形字幕 PGS/VobSub 为 false） */
+  IsTextSubtitleStream?: boolean
 }
 
 export interface EmbyMediaSource {
@@ -341,6 +345,8 @@ export interface EmbyMediaInfo {
   audioPrimary?: { codec: string; channels: number }
   /** 直连流地址（与 getMpvPlayback 同构）；魔改 Emby 无 MediaStreams 时拿它给 mpv 探测，省一次请求 */
   streamUrl: string
+  /** 服务器端外挂字幕（独立字幕流，不在直连流里）；供详情页预选，播放时 mpv --sub-file 加载 */
+  externalSubs: MediaExtSub[]
 }
 
 /** 取 Emby/Jellyfin 条目的媒体信息：音轨/字幕（供预选）+ 视频格式/文件路径（供技术信息）。
@@ -377,6 +383,21 @@ export async function getMediaInfo(session: EmbySession, itemId: string): Promis
       })
     }
   }
+  // 外挂字幕（IsExternal 文本字幕）：不在 Static 直连流里，播放时 mpv 用 DeliveryUrl 经 --sub-file 加载
+  const externalSubs: MediaExtSub[] = streams
+    .filter(
+      (st) =>
+        st.Type === 'Subtitle' &&
+        st.IsExternal &&
+        (st.IsTextSubtitleStream ?? /srt|ass|ssa|vtt|subrip|text/i.test(st.Codec || '')) &&
+        (st.DeliveryUrl || st.Index != null)
+    )
+    .map((st) => {
+      let u = st.DeliveryUrl || `/Videos/${itemId}/${src?.Id ?? itemId}/Subtitles/${st.Index}/Stream.${st.Codec || 'srt'}`
+      if (!/^https?:/i.test(u)) u = `${session.serverUrl}${u}`
+      if (!/[?&]api_key=/i.test(u)) u += (u.includes('?') ? '&' : '?') + 'api_key=' + session.token
+      return { url: u, lang: st.Language || '', title: st.DisplayTitle || st.Title || '' }
+    })
   const v = embedded.find((st) => st.Type === 'Video')
   const a = embedded.find((st) => st.Type === 'Audio')
   // 直连流地址（与 getMpvPlayback 同构），供魔改 Emby 的 mpv 探测复用，避免再请求一次条目详情
@@ -401,7 +422,8 @@ export async function getMediaInfo(session: EmbySession, itemId: string): Promis
     bitrate: src?.Bitrate || 0,
     video: v ? { width: v.Width || 0, height: v.Height || 0, codec: v.Codec || '', range: v.VideoRange || '' } : undefined,
     audioPrimary: a ? { codec: a.Codec || '', channels: a.Channels || 0 } : undefined,
-    streamUrl
+    streamUrl,
+    externalSubs
   }
 }
 

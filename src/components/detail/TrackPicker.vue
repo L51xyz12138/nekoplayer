@@ -8,6 +8,8 @@ import type { MediaTracks } from '@/types/media'
 const props = defineProps<{ tracks: MediaTracks }>()
 const aid = defineModel<number | undefined>('aid')
 const sid = defineModel<number | 'no' | undefined>('sid')
+// 选中的外挂字幕直链（Emby 外挂轨）；有值时播放走 --sub-file，sid 同时指到它（自带轨之后）
+const subFile = defineModel<string | undefined>('subFile')
 
 const LANGS: Record<string, string> = {
   jpn: '日语',
@@ -52,18 +54,41 @@ function label(t: { lang: string; title: string; codec: string }, i: number, kin
   return `${base} (${t.codec.toUpperCase()})`
 }
 
-// 单音轨无从选择 → 不显示音轨行；字幕有轨道就显示（可关/切换）
+// 外挂字幕（Emby 服务器端独立字幕流）
+const extSubs = computed(() => props.tracks.ext ?? [])
+function extLabel(e: { lang: string; title: string }): string {
+  return (e.title || langName(e.lang) || '外挂字幕') + ' · 外挂'
+}
+
+// 单音轨无从选择 → 不显示音轨行；有内封或外挂字幕就显示字幕行（可关/切换）
 const showAudio = computed(() => props.tracks.audio.length >= 2)
-const showSub = computed(() => props.tracks.sub.length >= 1)
+const showSub = computed(() => props.tracks.sub.length >= 1 || extSubs.value.length >= 1)
 
 // <select> 值用字符串，映射回 number | 'no' | undefined（''=默认）
 const audioSel = computed<string>({
   get: () => (aid.value === undefined ? '' : String(aid.value)),
   set: (v) => (aid.value = v === '' ? undefined : Number(v))
 })
+// 字幕值：''=默认 / 'no'=关 / 'N'=内封 sid / 'x:K'=外挂字幕（extSubs[K]）
 const subSel = computed<string>({
-  get: () => (sid.value === undefined ? '' : sid.value === 'no' ? 'no' : String(sid.value)),
-  set: (v) => (sid.value = v === '' ? undefined : v === 'no' ? 'no' : Number(v))
+  get: () => {
+    if (sid.value === 'no') return 'no'
+    if (subFile.value) {
+      const k = extSubs.value.findIndex((e) => e.url === subFile.value)
+      if (k >= 0) return 'x:' + k
+    }
+    return sid.value === undefined ? '' : String(sid.value)
+  },
+  set: (v) => {
+    if (v.startsWith('x:')) {
+      // 外挂字幕：加载它 + sid 指到「自带字幕数+1」（它排在自带轨之后）
+      subFile.value = extSubs.value[Number(v.slice(2))]?.url
+      sid.value = props.tracks.sub.length + 1
+    } else {
+      subFile.value = undefined
+      sid.value = v === '' ? undefined : v === 'no' ? 'no' : Number(v)
+    }
+  }
 })
 </script>
 
@@ -92,6 +117,9 @@ const subSel = computed<string>({
             <option v-for="(t, i) in tracks.sub" :key="'s' + t.id" :value="String(t.id)">
               {{ label(t, i, 'sub') }}
             </option>
+            <option v-for="(e, k) in extSubs" :key="'x' + k" :value="'x:' + k">
+              {{ extLabel(e) }}
+            </option>
           </select>
           <ChevronDown :size="16" class="field__chevron" />
         </div>
@@ -109,6 +137,10 @@ const subSel = computed<string>({
   font-size: 20px;
   font-weight: 700;
   margin-bottom: 18px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+:root[data-scheme='light'] .tracks__title {
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.85);
 }
 .tracks__grid {
   display: grid;

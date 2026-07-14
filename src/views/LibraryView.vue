@@ -16,6 +16,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import { useSources } from '@/composables/useSources'
 import { useEmby } from '@/composables/useEmby'
 import { usePlayer } from '@/composables/usePlayer'
+import { useBackground } from '@/composables/useBackground'
 import type { MediaItem } from '@/types/media'
 
 const router = useRouter()
@@ -101,6 +102,10 @@ function onRefreshFeatured() {
 watch(featuredList, () => (heroIndex.value = 0))
 startHeroRotate()
 onBeforeUnmount(() => clearInterval(heroTimer))
+
+// 全局海报背景：跟随当前精选（换批/自动切换时同步）
+const { setBackdrop } = useBackground()
+watch(heroItem, (it) => setBackdrop(it?.backdropUrl || it?.posterUrl), { immediate: true })
 
 // 当前选中的是「文件浏览类源」（本机/WebDAV/SMB/DLNA）→ 默认视图走文件夹层级浏览
 const FILE_KINDS = ['local', 'webdav', 'smb', 'dlna']

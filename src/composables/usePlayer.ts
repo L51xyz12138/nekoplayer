@@ -13,6 +13,8 @@ import type { Episode, MediaItem } from '@/types/media'
 export interface PlayTracks {
   aid?: number
   sid?: number | 'no'
+  /** 外挂字幕直链（Emby/Jellyfin 服务器端外挂字幕）：mpv 用 --sub-file 加载、并由 sid 选中它 */
+  subFile?: string
 }
 
 /** 传给主进程做 Trakt scrobble 的信息（仅 mpv、且已连接 Trakt、有可用 id 时才有值） */
@@ -163,7 +165,10 @@ async function playWith(item: MediaItem, episode: Episode | undefined, player: s
             userId: s.userId,
             deviceId: localStorage.getItem('neko-device-id') || '',
             itemId: playItemId,
-            playSessionId: psid
+            playSessionId: psid,
+            // 整季连播：各集 id（顺序与 playItems 一致）+ 起始索引，供 main 按当前播放集回传进度
+            itemIds: targetIds,
+            startIndex: startAt
           },
           tracks,
           scrobble

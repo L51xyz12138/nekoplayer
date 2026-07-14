@@ -158,6 +158,10 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
   let lastPct = 0
   let scrobbleStarted = false
   let attempts = 0
+  // 整季连播：mpv 自动换集后进度要回传给「当前正在播的那一集」，而非起始集
+  let curIdx = emby && typeof emby.startIndex === 'number' ? emby.startIndex : 0
+  const itemIdAt = (i) => (emby && emby.itemIds && emby.itemIds[i]) || (emby && emby.itemId)
+  const curEmby = () => (emby ? { ...emby, itemId: itemIdAt(curIdx) } : emby)
   const connect = () => {
     const sock = net.connect(socketPath)
     sock.on('connect', () => {
@@ -192,7 +196,8 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
           ? setInterval(() => {
               send(['get_property', 'time-pos'])
               if (scrobble || fileKey) send(['get_property', 'percent-pos'], 3)
-              if (emby && lastPos > 0) reportMpvProgress(emby, lastPos)
+              if (emby && emby.itemIds) send(['get_property', 'playlist-pos'], 4) // 当前播到第几集
+              if (emby && lastPos > 0) reportMpvProgress(curEmby(), lastPos)
             }, 3000)
           : null
       let buf = ''
@@ -206,7 +211,14 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
             const msg = JSON.parse(line)
             if (msg.error === 'success' && typeof msg.data === 'number') {
               if (msg.request_id === 3) lastPct = msg.data
-              else lastPos = msg.data // time-pos
+              else if (msg.request_id === 4) {
+                // 换集了：切到新集，清掉上一集的位置（避免把上一集的进度错报到新集）
+                if (msg.data !== curIdx) {
+                  curIdx = msg.data
+                  lastPos = 0
+                  lastPct = 0
+                }
+              } else lastPos = msg.data // time-pos
             }
             if (msg.event === 'file-loaded') {
               // 文件加载完（脚本此时自动选轨）→ 稍后强制设回预选轨道；再补一次防脚本延迟覆盖
@@ -234,11 +246,12 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
           mainWin.webContents.send('file-progress', { key: fileKey, pos: lastPos, pct: lastPct / 100 })
         }
         if (!emby) return
-        reportMpvStopped(emby, lastPos)
+        // 回传给 mpv 实际结束时那一集（整季连播时可能已不是起始集）
+        reportMpvStopped(curEmby(), lastPos)
         // 延迟一下等 Emby 处理完 Stopped，再通知前端刷新，拉到最新进度
         setTimeout(() => {
           if (mainWin && !mainWin.isDestroyed())
-            mainWin.webContents.send('playback-ended', emby?.itemId)
+            mainWin.webContents.send('playback-ended', itemIdAt(curIdx))
         }, 1000)
       })
     })
@@ -385,6 +398,8 @@ ipcMain.handle('play-mpv', (_e, payload) => {
   // 详情页预选的音轨/字幕（覆盖设置里的语言偏好，故放最后）
   if (tracks) {
     if (typeof tracks.aid === 'number') args.push(`--aid=${tracks.aid}`)
+    // Emby 外挂字幕：先 --sub-file 加载（其 sid 排在自带字幕之后），再由下面的 --sid 选中它
+    if (tracks.subFile) args.push(`--sub-file=${tracks.subFile}`)
     if (tracks.sid === 'no') args.push('--sid=no')
     // 选了具体字幕时同时开字幕显示——有些 mpv 配置默认 sub-visibility=no，只 --sid 选了却不显示
     else if (typeof tracks.sid === 'number') args.push(`--sid=${tracks.sid}`, '--sub-visibility=yes')
@@ -489,15 +504,19 @@ function linuxVlcArgs(url, seek, trackArgs = []) {
 // 0-based 序号」故减 1（`--no-spu` 关字幕）；PotPlayer/Infuse 无可靠的命令行选轨 → 不传（用其自身菜单切）。
 function externalTrackArgs(player, tracks) {
   if (!tracks) return []
-  const { aid, sid } = tracks
+  const { aid, sid, subFile } = tracks
   const out = []
   if (player === 'iina') {
     if (typeof aid === 'number') out.push(`--mpv-aid=${aid}`)
+    // 外挂字幕（Emby 外挂轨）：IINA 基于 mpv → --mpv-sub-file 加载，再由 --mpv-sid（=自带字幕数+1）选中
+    if (subFile) out.push(`--mpv-sub-file=${subFile}`)
     if (sid === 'no') out.push('--mpv-sid=no')
     else if (typeof sid === 'number') out.push(`--mpv-sid=${sid}`, '--mpv-sub-visibility=yes')
   } else if (player === 'vlc') {
     if (typeof aid === 'number') out.push(`--audio-track=${aid - 1}`)
-    if (sid === 'no') out.push('--no-spu')
+    // 外挂字幕：VLC 用 --sub-file 加载并自动显示（不再按序号选，避免加载后序号错位）
+    if (subFile) out.push(`--sub-file=${subFile}`)
+    else if (sid === 'no') out.push('--no-spu')
     else if (typeof sid === 'number') out.push(`--sub-track=${sid - 1}`)
   }
   return out
@@ -1289,16 +1308,17 @@ function initialLight() {
     return false
   }
 }
-// 渲染进程切换亮/暗时同步更新标题栏按钮区配色
-ipcMain.on('set-titlebar-theme', (_e, light) => {
-  if (process.platform === 'win32' && mainWin?.setTitleBarOverlay) {
-    try {
-      mainWin.setTitleBarOverlay(titlebarColors(light))
-    } catch {
-      /* ignore */
-    }
-  }
+// 渲染进程切换亮/暗时同步更新标题栏按钮区配色（旧的 overlay 方案已弃用、自绘按钮后为空操作，保留以防旧渲染进程调用）
+ipcMain.on('set-titlebar-theme', () => {})
+
+// 自绘标题栏的窗口控制（最小化/最大化还原/关闭）
+ipcMain.on('window-minimize', () => mainWin?.minimize())
+ipcMain.on('window-maximize', () => {
+  if (!mainWin) return
+  if (mainWin.isMaximized()) mainWin.unmaximize()
+  else mainWin.maximize()
 })
+ipcMain.on('window-close', () => mainWin?.close())
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -1310,12 +1330,11 @@ function createWindow() {
     title: 'NekoPlayer',
     autoHideMenuBar: true,
     acceptFirstMouse: true,
-    // 去掉原生标题栏，内容拉通到顶。Windows：窗口按钮走悬浮层；macOS：保留红绿灯；Linux：保留原生边框以免丢按钮
-    ...(process.platform === 'win32'
-      ? { titleBarStyle: 'hidden', titleBarOverlay: titlebarColors(initialLight()) }
-      : process.platform === 'darwin'
-        ? { titleBarStyle: 'hidden' }
-        : {}),
+    // 全自绘标题栏：win32/darwin 隐藏原生标题栏（win 自绘窗口按钮、mac 保留红绿灯），内容+海报背景拉通到顶；
+    // linux 保留原生边框以免丢按钮。（不再用 titleBarOverlay——纯色按钮区无法融入海报模糊背景）
+    ...(process.platform === 'win32' || process.platform === 'darwin'
+      ? { titleBarStyle: 'hidden' }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: false,
@@ -1334,6 +1353,12 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
+  // 自绘标题栏：最大化状态变化 → 通知渲染进程切换「最大化/还原」图标
+  const sendMax = () => {
+    if (!win.isDestroyed()) win.webContents.send('window-maximized', win.isMaximized())
+  }
+  win.on('maximize', sendMax)
+  win.on('unmaximize', sendMax)
   mainWin = win
 }
 

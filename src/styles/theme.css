@@ -14,11 +14,14 @@
   --surface-hover: rgba(255, 255, 255, 0.11);
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
+  /* 海报模糊背景的遮罩渐变（顶部浅让海报透出、越往下越深、保证内容区文字清晰） */
+  --scrim-1: rgba(6, 7, 11, 0.2);
+  --scrim-2: rgba(11, 12, 17, 0.84);
 
   /* 文本 */
   --text: #f5f7fc;
-  --text-dim: #aeb6c8;
-  --text-mute: #6a7285;
+  --text-dim: #b8c0d0;
+  --text-mute: #8b94a8;
 
   /* 圆角 */
   --r-sm: 8px;
@@ -51,8 +54,11 @@
   --border: rgba(18, 22, 33, 0.1);
   --border-strong: rgba(18, 22, 33, 0.18);
   --text: #1a1e28;
-  --text-dim: #48505f;
-  --text-mute: #868f9f;
+  --text-dim: #3d4552;
+  --text-mute: #616977;
   --shadow-card: 0 14px 34px rgba(20, 30, 60, 0.12);
   --shadow-pop: 0 28px 70px rgba(20, 30, 60, 0.18);
+  /* 亮色下遮罩用浅色，海报透出但不压暗前景 */
+  --scrim-1: rgba(233, 237, 244, 0.38);
+  --scrim-2: rgba(245, 247, 251, 0.92);
 }

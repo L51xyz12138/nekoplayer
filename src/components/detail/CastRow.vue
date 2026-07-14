@@ -69,6 +69,10 @@ watch(() => props.people, () => nextTick(update))
 .cast__title {
   font-size: 20px;
   font-weight: 700;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+:root[data-scheme='light'] .cast__title {
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.85);
 }
 .cast__nav {
   margin-left: auto;

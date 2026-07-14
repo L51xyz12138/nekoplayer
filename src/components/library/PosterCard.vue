@@ -202,6 +202,8 @@ function onSpace() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* 卡片标题在海报下方、压在海报模糊背景上 → 加阴影保清晰 */
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
 }
 .card__sub {
   display: flex;
@@ -209,6 +211,11 @@ function onSpace() {
   justify-content: space-between;
   margin-top: 3px;
   font-size: 12px;
-  color: var(--text-mute);
+  color: var(--text-dim);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+:root[data-scheme='light'] .card__title,
+:root[data-scheme='light'] .card__sub {
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.85);
 }
 </style>

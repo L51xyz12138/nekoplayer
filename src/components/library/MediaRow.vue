@@ -52,6 +52,11 @@ function scroll(dir: number) {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  /* 压在海报模糊背景上也清晰：紧贴的深阴影 + 柔光 */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 2px 16px rgba(0, 0, 0, 0.5);
+}
+:root[data-scheme='light'] .row__title {
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 2px 14px rgba(255, 255, 255, 0.7);
 }
 .row__nav {
   display: flex;

@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { Clapperboard, Server, Settings, Tv } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useTrakt } from '@/composables/useTrakt'
-import iconUrl from '@/assets/icon.svg'
 
 const route = useRoute()
 const trakt = useTrakt()
@@ -26,10 +25,6 @@ function isActive(name: string) {
 
 <template>
   <aside class="rail">
-    <RouterLink to="/" class="rail__logo" title="NekoPlayer · 返回主页">
-      <img :src="iconUrl" alt="NekoPlayer" draggable="false" />
-    </RouterLink>
-
     <nav class="rail__nav">
       <RouterLink
         v-for="item in items"
@@ -56,36 +51,16 @@ function isActive(name: string) {
   align-items: center;
   width: var(--rail-w);
   flex-shrink: 0;
-  padding: 18px 0 20px;
+  /* 顶部留出悬浮标题栏（44px）的高度，导航从其下方开始 */
+  padding: 58px 0 20px;
   gap: 8px;
   /* 极淡的左侧染色，向右渐隐为透明 → 没有硬边/边线，和内容区柔和相接（不突兀） */
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.012) 60%, transparent);
   /* 侧栏空白处也可拖动窗口（按钮/链接下面设了 no-drag） */
   -webkit-app-region: drag;
 }
-.rail__logo,
 .rail__item {
   -webkit-app-region: no-drag;
-}
-
-.rail__logo {
-  display: grid;
-  place-items: center;
-  width: 46px;
-  height: 46px;
-  margin-bottom: 10px;
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 8px 22px var(--accent-glow);
-  transition: transform var(--dur) var(--ease);
-}
-.rail__logo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.rail__logo:hover {
-  transform: translateY(-1px);
 }
 
 .rail__nav {

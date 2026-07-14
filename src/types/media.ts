@@ -139,10 +139,22 @@ export interface MediaTrack {
   codec: string
 }
 
+/** 外挂字幕（不在直连流里，播放时 mpv --sub-file 加载并选中）：Emby/Jellyfin 服务器端独立字幕流 */
+export interface MediaExtSub {
+  /** 带 api_key 的字幕直链 */
+  url: string
+  /** 语言代码 */
+  lang: string
+  /** 显示名（DisplayTitle） */
+  title: string
+}
+
 /** 一个视频的音轨与字幕轨道集合 */
 export interface MediaTracks {
   audio: MediaTrack[]
   sub: MediaTrack[]
+  /** 外挂字幕（Emby/Jellyfin 服务器端独立字幕流），供详情页预选（mpv 用 --sub-file 加载） */
+  ext?: MediaExtSub[]
 }
 
 /** 媒体文件技术信息 */

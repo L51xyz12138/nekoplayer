@@ -238,8 +238,7 @@ function pickSort(mode: SortMode) {
   z-index: 20;
   min-width: 150px;
   padding: 6px;
-  background: rgba(20, 22, 30, 0.86);
-  backdrop-filter: var(--blur);
+  background: var(--bg-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);

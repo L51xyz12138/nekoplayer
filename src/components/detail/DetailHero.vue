@@ -46,11 +46,7 @@ const players: string[] = nn?.playMpv
 
 <template>
   <header class="dhero">
-    <div class="dhero__bg">
-      <PosterImage :seed="item.id" :src="item.backdropUrl" kind="backdrop" />
-    </div>
-    <div class="dhero__scrim" />
-
+    <!-- 背景由全局 focus 海报层提供（整窗大海报 + 底部平滑压暗），此处不再叠局部遮罩，避免出现黑块 -->
     <div class="dhero__inner">
       <div class="dhero__poster">
         <PosterImage
@@ -129,19 +125,6 @@ const players: string[] = nn?.playMpv
   display: flex;
   align-items: flex-end;
 }
-.dhero__bg {
-  position: absolute;
-  inset: 0;
-}
-.dhero__scrim {
-  position: absolute;
-  inset: 0;
-  /* 文字区（左下）压足够深的暗色垫底，保证任何背景图上文字都清晰（两个主题都是暗底亮字） */
-  background:
-    linear-gradient(0deg, var(--bg-1) 0%, rgba(8, 9, 13, 0.74) 46%, rgba(8, 9, 13, 0.2) 72%, transparent 92%),
-    linear-gradient(90deg, rgba(6, 7, 11, 0.85) 0%, rgba(6, 7, 11, 0.35) 46%, transparent 68%);
-}
-
 .dhero__inner {
   position: relative;
   display: flex;
@@ -171,7 +154,7 @@ const players: string[] = nn?.playMpv
   letter-spacing: -0.01em;
   /* 固定亮色（不随主题翻转）——hero 背景是暗色遮罩过的海报，亮色 + 阴影两个主题都清晰 */
   color: #fff;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 2px 28px rgba(0, 0, 0, 0.5);
 }
 .dhero__tagline {
   margin-top: 10px;
@@ -204,8 +187,8 @@ const players: string[] = nn?.playMpv
   margin-top: 16px;
   font-size: 15px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.92);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
+  color: rgba(255, 255, 255, 0.94);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 1px 16px rgba(0, 0, 0, 0.7);
 }
 .dhero__progress {
   display: flex;
