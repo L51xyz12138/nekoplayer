@@ -7,6 +7,7 @@ import PosterImage from '@/components/common/PosterImage.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSources } from '@/composables/useSources'
 import { usePlayer } from '@/composables/usePlayer'
+import { useBackground } from '@/composables/useBackground'
 import type { MediaItem } from '@/types/media'
 
 const route = useRoute()
@@ -51,6 +52,11 @@ watch(
   },
   { immediate: true }
 )
+
+// 全局海报背景：与媒体库一致（home 模糊）——用首个作品的背景/海报，退回人物头像
+const { setBackdrop } = useBackground()
+const bgImage = computed(() => works.value[0]?.backdropUrl || works.value[0]?.posterUrl || avatar.value)
+watch(bgImage, (img) => setBackdrop(img), { immediate: true })
 
 function playItem(m: MediaItem) {
   player.play(m)

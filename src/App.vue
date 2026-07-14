@@ -12,15 +12,16 @@ import iconUrl from '@/assets/icon.svg'
 
 const { loadFromEmby, refreshAfterPlayback, applyFileProgress } = useLibrary()
 const update = useUpdate()
-const { backdropUrl, backdropMode, setBackdropMode } = useBackground()
+const { backdropUrl, backdropMode, setBackdrop } = useBackground()
 
-// 海报背景全页面都显示：首页/详情页各自设 home/focus；其它页(媒体源/设置/Trakt/合集/演员)
-// 切到 ambient（更强模糊 + 更深遮罩），保留海报氛围又保证内容清晰。
+// 海报背景：首页/合集/演员页=模糊海报(home)、详情页=清晰大海报(focus)，各自挂载时设置；
+// 其它页(媒体源/设置/Trakt)清空 → 回退纯渐变底色。
+const BG_ROUTES = ['library', 'detail', 'collection', 'person']
 const route = useRoute()
 watch(
   () => route.name,
   (name) => {
-    if (name !== 'library' && name !== 'detail') setBackdropMode('ambient')
+    if (!BG_ROUTES.includes(String(name))) setBackdrop(undefined)
   },
   { immediate: true }
 )
@@ -55,20 +56,16 @@ onMounted(() => {
 <template>
   <div class="app">
     <!-- 全局海报模糊背景（最底层）：主页=精选海报、详情页=该片海报；上面盖渐变遮罩保证文字清晰 -->
-    <div class="app__bg" :class="{ 'is-ambient': backdropMode === 'ambient' }">
+    <div class="app__bg">
       <transition name="bgfade">
         <div v-if="backdropUrl" :key="backdropUrl" class="app__bg-media">
-          <!-- 模糊底层（整幅；ambient 模式更强模糊） -->
+          <!-- 模糊底层（整幅） -->
           <img :src="backdropUrl" class="app__bg-blur" alt="" />
           <!-- 清晰叠层（仅详情页 focus）：中间偏上清晰、径向遮罩向四周淡出露出模糊底层 -->
           <img v-if="backdropMode === 'focus'" :src="backdropUrl" class="app__bg-sharp" alt="" />
         </div>
       </transition>
-      <div
-        v-if="backdropUrl"
-        class="app__bg-scrim"
-        :class="{ 'is-focus': backdropMode === 'focus', 'is-ambient': backdropMode === 'ambient' }"
-      />
+      <div v-if="backdropUrl" class="app__bg-scrim" :class="{ 'is-focus': backdropMode === 'focus' }" />
     </div>
 
     <!-- 自绘标题栏：图标+标题顶格左上，窗口按钮右上（win），中间可拖拽 -->
@@ -91,7 +88,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="app__row">
+    <div class="app__row" :class="{ 'has-bg': backdropUrl }">
       <SideBar />
       <main class="app__main">
         <router-view v-slot="{ Component }">
@@ -183,10 +180,6 @@ onMounted(() => {
   filter: blur(40px) saturate(1.35);
   transform: scale(1.08);
 }
-/* 工具页：中等高斯模糊（海报作氛围底纹，但仍看得出是海报） */
-.app__bg.is-ambient .app__bg-blur {
-  filter: blur(50px) saturate(1.3);
-}
 /* 清晰叠层：中间偏上清晰、径向遮罩向四周淡出露出下层模糊（详情页整窗大海报效果） */
 .app__bg-sharp {
   position: absolute;
@@ -208,13 +201,6 @@ onMounted(() => {
 }
 :root[data-scheme='light'] .app__bg-scrim.is-focus {
   background: linear-gradient(180deg, transparent 0%, transparent 18%, rgba(238, 242, 248, 0.55) 52%, rgba(245, 247, 251, 0.92) 100%);
-}
-/* 工具页 ambient：中等偏透的遮罩——海报明显透出作氛围，又给内容垫底 */
-.app__bg-scrim.is-ambient {
-  background: linear-gradient(180deg, rgba(6, 7, 11, 0.48) 0%, rgba(11, 12, 17, 0.7) 100%);
-}
-:root[data-scheme='light'] .app__bg-scrim.is-ambient {
-  background: linear-gradient(180deg, rgba(233, 237, 244, 0.58) 0%, rgba(245, 247, 251, 0.82) 100%);
 }
 .bgfade-enter-active,
 .bgfade-leave-active {
@@ -293,11 +279,13 @@ onMounted(() => {
   display: flex;
   flex: 1;
   min-height: 0;
-  /* 内容压在海报背景上：给所有文字一层淡阴影提升可读性（子元素经继承生效；标题等自设更强阴影会覆盖）。
-     背景恒有遮罩（暗色暗底/亮色亮底），故暗色用深阴影、亮色用浅阴影即可在任意海报上清晰 */
+}
+/* 仅当有海报背景时（首页/详情页）给文字一层淡阴影提升可读性（子元素经继承生效；标题等自设更强阴影会覆盖）。
+   其它页是纯渐变底、文字本就清晰，不加阴影（免得干净 UI 上多余的阴影）。背景恒有遮罩→暗色深阴影、亮色浅阴影 */
+.app__row.has-bg {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
-:root[data-scheme='light'] .app__row {
+:root[data-scheme='light'] .app__row.has-bg {
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95);
 }
 .app__main {

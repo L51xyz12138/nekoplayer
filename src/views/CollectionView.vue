@@ -8,6 +8,7 @@ import { mapEmbyItem } from '@/api/mapper'
 import { useLibrary } from '@/composables/useLibrary'
 import { useSources } from '@/composables/useSources'
 import { usePlayer } from '@/composables/usePlayer'
+import { useBackground } from '@/composables/useBackground'
 import type { MediaItem } from '@/types/media'
 
 const props = defineProps<{ id: string }>()
@@ -53,6 +54,17 @@ watch(
 function play(m: MediaItem) {
   player.play(m)
 }
+
+// 全局海报背景：与媒体库一致（home 模糊）——用合集封面，退回首个成员的背景/海报
+const { setBackdrop } = useBackground()
+const bgImage = computed(
+  () =>
+    collection.value?.backdropUrl ||
+    collection.value?.posterUrl ||
+    children.value[0]?.backdropUrl ||
+    children.value[0]?.posterUrl
+)
+watch(bgImage, (img) => setBackdrop(img), { immediate: true })
 </script>
 
 <template>
