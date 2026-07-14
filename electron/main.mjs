@@ -196,7 +196,7 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
           ? setInterval(() => {
               send(['get_property', 'time-pos'])
               if (scrobble || fileKey) send(['get_property', 'percent-pos'], 3)
-              if (emby && emby.itemIds) send(['get_property', 'playlist-pos'], 4) // 当前播到第几集
+              // 进度回传给「当前正在播的那一集」（curIdx 在换集时于 file-loaded 精确更新）
               if (emby && lastPos > 0) reportMpvProgress(curEmby(), lastPos)
             }, 3000)
           : null
@@ -211,12 +211,17 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
             const msg = JSON.parse(line)
             if (msg.error === 'success' && typeof msg.data === 'number') {
               if (msg.request_id === 3) lastPct = msg.data
-              else if (msg.request_id === 4) {
-                // 换集了：切到新集，清掉上一集的位置（避免把上一集的进度错报到新集）
+              else if (msg.request_id === 5) {
+                // file-loaded 时读到的当前集索引；变了 = 换集（自动连播/手动下一集）
                 if (msg.data !== curIdx) {
+                  // 上一集：用它结束前的位置补报 Stopped（Emby 据此标记已看/记录进度）——
+                  // 此刻 lastPos 仍是上一集的（新集 time-pos 还没读到）
+                  if (emby) reportMpvStopped(curEmby(), lastPos)
                   curIdx = msg.data
                   lastPos = 0
                   lastPct = 0
+                  // 新集：补 PlaybackStart 注册，后续 Progress 才会更新这一集的进度
+                  if (emby) reportMpvStart(curEmby())
                 }
               } else lastPos = msg.data // time-pos
             }
@@ -226,6 +231,8 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
                 setTimeout(applyTracks, 400)
                 setTimeout(applyTracks, 1200)
               }
+              // 换集检测：每加载一个文件读一次 playlist-pos，变了就 上一集 Stopped + 新集 Start（见 request_id:5）
+              if (emby && emby.itemIds && emby.itemIds.length > 1) send(['get_property', 'playlist-pos'], 5)
               // 开始 scrobble（只对起播那一条，多集连播只算起始集，与 Emby 进度一致）
               if (scrobble && !scrobbleStarted) {
                 scrobbleStarted = true
@@ -267,6 +274,22 @@ function trackMpvProgress(socketPath, emby, tracks, scrobble, fileKey) {
 function embyAuthHeaders(emby) {
   const v = `MediaBrowser Client="NekoPlayer", Device="NekoPlayer", DeviceId="${emby.deviceId || ''}", Version="0.1.1", Token="${emby.token}"`
   return { 'X-Emby-Authorization': v, Authorization: v, 'Content-Type': 'application/json' }
+}
+
+// 整季连播换到新集时补一次 PlaybackStart（同一 PlaySessionId 下把「当前项」切到新集）——
+// 否则 Emby 认为该集没在这个会话里播过，后续 Progress/Stopped 不更新它的进度（正是「跳集不同步」的根因）
+async function reportMpvStart(emby) {
+  if (!emby || !emby.serverUrl || !emby.token || !emby.itemId) return
+  try {
+    const res = await fetch(`${emby.serverUrl}/Sessions/Playing`, {
+      method: 'POST',
+      headers: embyAuthHeaders(emby),
+      body: JSON.stringify({ ItemId: emby.itemId, PlaySessionId: emby.playSessionId || '', PlayMethod: 'DirectStream' })
+    })
+    console.log('[mpv] 换集 Start 上报：', res.status, 'itemId=', emby.itemId)
+  } catch (e) {
+    console.error('[mpv] 换集 Start 上报失败：', e.message)
+  }
 }
 
 async function reportMpvStopped(emby, posSeconds) {
