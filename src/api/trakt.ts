@@ -223,6 +223,52 @@ export async function getHistory(token: string): Promise<TraktListItem[]> {
   }
 }
 
+// ---- 观看统计 ----
+/** Trakt 聚合统计（/users/me/stats） */
+export interface TraktStats {
+  moviesWatched: number
+  moviesMinutes: number
+  showsWatched: number
+  episodesWatched: number
+  episodesMinutes: number
+  ratingsTotal: number
+  /** 评分分布：分值(1-10) → 次数 */
+  ratingsDist: Record<string, number>
+}
+/** 拉 Trakt 聚合统计（看过多少部/集、总时长、评分分布）。需 token */
+export async function getStats(token: string): Promise<TraktStats | null> {
+  try {
+    const res = await fetch(`${API}/users/me/stats`, { headers: traktHeaders(token) })
+    if (!res.ok) return null
+    const d = await res.json()
+    return {
+      moviesWatched: d.movies?.watched || 0,
+      moviesMinutes: d.movies?.minutes || 0,
+      showsWatched: d.shows?.watched || 0,
+      episodesWatched: d.episodes?.watched || 0,
+      episodesMinutes: d.episodes?.minutes || 0,
+      ratingsTotal: d.ratings?.total || 0,
+      ratingsDist: d.ratings?.distribution || {}
+    }
+  } catch {
+    return null
+  }
+}
+/** 取最近观看的日期列表（'YYYY-MM-DD'，含重复=当天看了几条），供日历热力图。需 token */
+export async function getWatchDates(token: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${API}/sync/history?limit=1000`, { headers: traktHeaders(token) })
+    if (!res.ok) return []
+    const data = await res.json()
+    if (!Array.isArray(data)) return []
+    return data
+      .map((row) => (typeof row.watched_at === 'string' ? row.watched_at.slice(0, 10) : ''))
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 // ---- 回推：加/移出 想看·收藏、评分 ----
 /** 一个 Trakt 电影/剧引用：type + ids（用于回推的 body） */
 export interface TraktRef {

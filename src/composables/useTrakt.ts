@@ -6,7 +6,9 @@ import {
   getHistory,
   getMe,
   getRecommendations,
+  getStats,
   getTraktList,
+  getWatchDates,
   pollDeviceToken,
   rateItem,
   refreshAccessToken,
@@ -165,6 +167,17 @@ async function loadList(tab: TraktTab): Promise<TraktListItem[]> {
   return getTraktList(tok, tab)
 }
 
+/** 拉聚合统计（观看统计页用）——未连接返回 null */
+async function loadStats() {
+  const tok = await validToken()
+  return tok ? getStats(tok) : null
+}
+/** 拉最近观看日期（日历热力图用）——未连接返回空 */
+async function loadWatchDates() {
+  const tok = await validToken()
+  return tok ? getWatchDates(tok) : []
+}
+
 // ---- 想看/收藏/评分 的当前状态（供详情页按钮显示 + 回推）----
 // key = `${'movie'|'show'}:${tmdbId}`
 const status = reactive({
@@ -273,6 +286,8 @@ export function useTrakt() {
     disconnect,
     validToken,
     loadList,
+    loadStats,
+    loadWatchDates,
     loadStatus,
     inWatchlist,
     inCollection,

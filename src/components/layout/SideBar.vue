@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Clapperboard, Server, Settings, Tv } from 'lucide-vue-next'
+import { BarChart3, Clapperboard, Server, Settings, Tv } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useTrakt } from '@/composables/useTrakt'
 
@@ -10,6 +10,7 @@ const trakt = useTrakt()
 // 连接 Trakt 后才出现「Trakt」入口
 const items = computed(() => [
   { name: 'library', label: '媒体库', icon: Clapperboard, to: '/' },
+  { name: 'stats', label: '统计', icon: BarChart3, to: '/stats' },
   ...(trakt.connected.value ? [{ name: 'trakt', label: 'Trakt', icon: Tv, to: '/trakt' }] : []),
   { name: 'sources', label: '媒体源', icon: Server, to: '/sources' },
   { name: 'settings', label: '设置', icon: Settings, to: '/settings' }

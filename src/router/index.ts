@@ -31,6 +31,11 @@ export const router = createRouter({
       component: () => import('@/views/TraktView.vue')
     },
     {
+      path: '/stats',
+      name: 'stats',
+      component: () => import('@/views/StatsView.vue')
+    },
+    {
       path: '/sources',
       name: 'sources',
       component: () => import('@/views/SourcesView.vue')
