@@ -1,5 +1,6 @@
 import { computed, reactive } from 'vue'
 import { pget, pset, premove } from './persist'
+import { useToast } from './useToast'
 import {
   addToList,
   getDeviceCode,
@@ -240,6 +241,7 @@ async function toggleWatchlist(item: MediaItem) {
   if (!ok) {
     if (has) status.watchlist.add(key)
     else status.watchlist.delete(key) // 回滚
+    useToast().toast('同步到 Trakt 失败，请稍后重试', 'error')
   }
 }
 /** 切换「收藏」 */
@@ -255,6 +257,7 @@ async function toggleCollection(item: MediaItem) {
   if (!ok) {
     if (has) status.collection.add(key)
     else status.collection.delete(key)
+    useToast().toast('同步到 Trakt 失败，请稍后重试', 'error')
   }
 }
 /** 评分（1-10）；rating=0 取消评分 */
@@ -270,6 +273,7 @@ async function rate(item: MediaItem, rating: number) {
   if (!ok) {
     if (prev !== undefined) status.ratings.set(key, prev)
     else status.ratings.delete(key) // 回滚
+    useToast().toast('评分同步到 Trakt 失败，请稍后重试', 'error')
   }
 }
 

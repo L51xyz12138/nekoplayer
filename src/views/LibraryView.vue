@@ -41,6 +41,7 @@ const {
   refreshFeatured,
   loading,
   error,
+  loadFromEmby,
   activeSourceId,
   bySource,
   fileViewMode,
@@ -167,6 +168,9 @@ function play(item: MediaItem) {
       <div v-else-if="error" class="library__state">
         <p class="library__state-title">媒体库加载失败喵 (⊙﹏⊙)</p>
         <p class="library__state-sub">{{ error }}</p>
+        <button class="library__state-btn" :disabled="loading" @click="loadFromEmby()">
+          {{ loading ? '重试中…' : '重试' }}
+        </button>
       </div>
 
       <!-- 空 / 连接失败 -->

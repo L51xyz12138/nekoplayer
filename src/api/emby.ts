@@ -129,6 +129,9 @@ export interface EmbyPlaybackSource {
   MediaStreams?: EmbyMediaStream[]
 }
 
+// 单次请求超时（毫秒）：魔改/网盘版 Emby 或断网时 fetch 会无限挂起 → 整个库/详情卡在加载态。
+// 加 AbortController 兜底，超时抛错、由调用方(loadFromEmby 单源 catch / 详情 catch)处理。
+const REQUEST_TIMEOUT = 15000
 async function request(
   serverUrl: string,
   path: string,
@@ -136,20 +139,32 @@ async function request(
   init: RequestInit = {}
 ): Promise<Response> {
   const auth = authHeader(token)
-  const res = await fetch(`${serverUrl}${path}`, {
-    ...init,
-    headers: {
-      // 两个头都发：Emby 认 X-Emby-Authorization，Jellyfin 10.8+ 认 Authorization
-      'X-Emby-Authorization': auth,
-      Authorization: auth,
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init.headers
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT)
+  try {
+    const res = await fetch(`${serverUrl}${path}`, {
+      ...init,
+      signal: ctrl.signal,
+      headers: {
+        // 两个头都发：Emby 认 X-Emby-Authorization，Jellyfin 10.8+ 认 Authorization
+        'X-Emby-Authorization': auth,
+        Authorization: auth,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers
+      }
+    })
+    if (!res.ok) {
+      throw new Error(`请求失败：${res.status} ${res.statusText}`)
     }
-  })
-  if (!res.ok) {
-    throw new Error(`请求失败：${res.status} ${res.statusText}`)
+    return res
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error('请求超时（服务器无响应）')
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
   }
-  return res
 }
 
 /** 用户名 + 密码登录指定服务器 */

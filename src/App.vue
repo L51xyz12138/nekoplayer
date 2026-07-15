@@ -8,11 +8,13 @@ import { useSettings } from '@/composables/useSettings'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useUpdate } from '@/composables/useUpdate'
 import { useBackground } from '@/composables/useBackground'
+import { useToast } from '@/composables/useToast'
 import iconUrl from '@/assets/icon.svg'
 
 const { loadFromEmby, refreshAfterPlayback, applyFileProgress } = useLibrary()
 const update = useUpdate()
 const { backdropUrl, backdropMode, setBackdrop } = useBackground()
+const { toasts, dismiss } = useToast()
 
 // 海报背景：首页/合集/演员页=模糊海报(home)、详情页=清晰大海报(focus)，各自挂载时设置；
 // 其它页(媒体源/设置/Trakt)清空 → 回退纯渐变底色。
@@ -144,6 +146,19 @@ onMounted(() => {
         </button>
       </div>
     </transition>
+
+    <!-- 全局瞬时通知（播放失败、同步出错等）：底部居中堆叠 -->
+    <transition-group name="toast" tag="div" class="toasts">
+      <div
+        v-for="t in toasts"
+        :key="t.id"
+        class="toast"
+        :class="`toast--${t.type}`"
+        @click="dismiss(t.id)"
+      >
+        {{ t.message }}
+      </div>
+    </transition-group>
   </div>
 </template>
 
@@ -360,5 +375,49 @@ onMounted(() => {
 .update-toast__close:hover {
   color: var(--text);
   background: var(--surface-hover);
+}
+
+/* 全局瞬时通知（底部居中堆叠） */
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  max-width: 460px;
+  padding: 11px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-pop);
+  cursor: pointer;
+}
+.toast--error {
+  color: #fff;
+  background: linear-gradient(135deg, #e2445c, #c0304a);
+  border-color: transparent;
+}
+.toast--success {
+  border-color: color-mix(in srgb, #4ade80 55%, var(--border-strong));
+}
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 </style>

@@ -4,6 +4,7 @@ import { useLibrary } from './useLibrary'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
 import { useTrakt } from './useTrakt'
+import { useToast } from './useToast'
 import type { Episode, MediaItem } from '@/types/media'
 
 // NekoPlayer 为 Electron 优先：播放统一交给外部播放器（mpv/IINA/VLC/PotPlayer），无内置 web 播放器。
@@ -114,7 +115,10 @@ async function playWith(item: MediaItem, episode: Episode | undefined, player: s
     return
   }
   const s = useSources().sessionOf(item.sourceId)
-  if (!s) return
+  if (!s) {
+    useToast().toast('找不到该内容所属媒体源的会话，请检查媒体源是否已启用', 'error')
+    return
+  }
   const { settings } = useSettings()
   const targetId = episode?.id ?? item.id
   const label = episode ? `${item.title} · S${episode.season}E${episode.episode}` : item.title
@@ -179,7 +183,10 @@ async function playWith(item: MediaItem, episode: Episode | undefined, player: s
       }
       reportPlaybackStart(s, playItemId, psid).catch(() => {})
     })
-    .catch((e) => console.error('[NekoPlayer] 取流失败：', e))
+    .catch((e) => {
+      console.error('[NekoPlayer] 取流失败：', e)
+      useToast().toast(`播放失败：${e instanceof Error ? e.message : '取流出错'}`, 'error')
+    })
 }
 
 /** 播放本机/文件浏览类源的文件（外部播放器，无服务器进度同步）；player 省略则用默认播放器；
