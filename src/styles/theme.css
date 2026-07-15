@@ -32,6 +32,8 @@
 
   /* 阴影 */
   --shadow-card: 0 14px 34px rgba(0, 0, 0, 0.5);
+  /* 卡片 hover 阴影：负 spread 收窄横向扩散，避免横向滚动行里最左/右卡片阴影被 overflow 裁掉 */
+  --shadow-card-hover: 0 16px 26px -10px rgba(0, 0, 0, 0.6);
   --shadow-pop: 0 28px 70px rgba(0, 0, 0, 0.62);
 
   /* 磨砂 */
@@ -57,6 +59,7 @@
   --text-dim: #3d4552;
   --text-mute: #616977;
   --shadow-card: 0 14px 34px rgba(20, 30, 60, 0.12);
+  --shadow-card-hover: 0 16px 26px -10px rgba(20, 30, 60, 0.28);
   --shadow-pop: 0 28px 70px rgba(20, 30, 60, 0.18);
   /* 亮色下遮罩用浅色，海报透出但不压暗前景 */
   --scrim-1: rgba(233, 237, 244, 0.38);

@@ -34,6 +34,8 @@ const {
   filtered,
   continueWatching,
   recentlyAdded,
+  forYou,
+  becauseYouWatched,
   movies,
   series,
   collections,
@@ -260,6 +262,32 @@ function play(item: MediaItem) {
                 v-for="it in continueWatching"
                 :key="it.id"
                 :item="it"
+                @play="play"
+              />
+            </MediaRow>
+
+            <!-- 个性化推荐（从库内已看的类型偏好推得，纯本地） -->
+            <MediaRow v-if="forYou.length" title="为你推荐" item-width="158px">
+              <PosterCard
+                v-for="it in forYou"
+                :key="it.id"
+                :item="it"
+                @favorite="toggleFavorite"
+                @play="play"
+              />
+            </MediaRow>
+
+            <MediaRow
+              v-for="rec in becauseYouWatched"
+              :key="rec.anchor.id"
+              :title="`因为你看了《${rec.anchor.title}》`"
+              item-width="158px"
+            >
+              <PosterCard
+                v-for="it in rec.items"
+                :key="it.id"
+                :item="it"
+                @favorite="toggleFavorite"
                 @play="play"
               />
             </MediaRow>

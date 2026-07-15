@@ -108,7 +108,10 @@ watch(enabledSources, () => nextTick(update))
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  /* 留白容纳选中 tab 的辉光阴影（0 8px 20px），否则被 overflow 裁成方角；等量负 margin 抵消、不影响布局
+     （滚动条已 no-scrollbar 隐藏，加大 padding 不会露出滚动条） */
+  padding: 14px 22px 26px;
+  margin: -14px -22px -26px;
   scroll-behavior: smooth;
 }
 .stab {

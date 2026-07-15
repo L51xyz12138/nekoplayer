@@ -99,14 +99,14 @@ function onSpace() {
 }
 .card:hover .card__poster {
   transform: translateY(-5px) scale(1.03);
-  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card-hover);
 }
 /* 键盘导航焦点：强调色描边 + 显示播放层 */
 .card:focus-visible {
   outline: none;
 }
 .card:focus-visible .card__poster {
-  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-card-hover);
 }
 .card:focus-visible .card__overlay {
   opacity: 1;

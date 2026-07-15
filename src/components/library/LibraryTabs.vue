@@ -78,7 +78,9 @@ watch(libraries, () => nextTick(update))
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  /* 留白容纳选中 tab 的辉光阴影（0 6px 16px），否则被 overflow 裁成方角；等量负 margin 抵消、不影响布局 */
+  padding: 12px 20px 22px;
+  margin: -12px -20px -22px;
   scroll-behavior: smooth;
 }
 .ltab {

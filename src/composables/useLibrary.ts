@@ -218,6 +218,55 @@ const movies = computed(() => scoped.value.filter((m) => m.type === 'movie' && !
 const series = computed(() => scoped.value.filter((m) => m.type === 'series'))
 const collections = computed(() => scoped.value.filter((m) => m.type === 'collection'))
 
+// ---- 首页个性化推荐（纯本地：从「已看」条目学到类型偏好，给「未看」条目打分）----
+/** 类型偏好权重：已看条目里每个类型出现几次 */
+const genreWeights = computed(() => {
+  const w = new Map<string, number>()
+  for (const m of scoped.value)
+    if (m.watched) for (const g of m.genres || []) w.set(g, (w.get(g) || 0) + 1)
+  return w
+})
+/** 一个可推荐（未看、未在看、非合集/合集成员）条目 */
+const isRecommendable = (m: MediaItem) =>
+  m.type !== 'collection' && !m.collectionId && !m.watched && (m.progress ?? 0) === 0
+/** 为你推荐：未看条目按类型偏好（为主）+ 评分（为辅）打分，取前 14；无偏好（没已看）则不推荐 */
+const forYou = computed<MediaItem[]>(() => {
+  const w = genreWeights.value
+  if (!w.size) return []
+  const score = (m: MediaItem) =>
+    (m.genres || []).reduce((a, g) => a + (w.get(g) || 0), 0) * 3 + (m.rating || 0)
+  return scoped.value
+    .filter(isRecommendable)
+    .map((m) => ({ m, s: score(m) }))
+    .filter((x) => x.s > 0) // 至少命中一个偏好类型
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 14)
+    .map((x) => x.m)
+})
+/** 「因为你看了《X》」：取最近看过的至多 2 部（有类型的），各找共享类型最多的未看条目（≥4 个才成行） */
+const becauseYouWatched = computed<{ anchor: MediaItem; items: MediaItem[] }[]>(() => {
+  const recent = scoped.value
+    .filter((m) => m.watched && m.genres?.length && m.type !== 'collection')
+    .sort((a, b) => (b.lastPlayed ?? b.addedAt) - (a.lastPlayed ?? a.addedAt))
+  const out: { anchor: MediaItem; items: MediaItem[] }[] = []
+  const used = new Set<string>()
+  for (const anchor of recent) {
+    if (out.length >= 2) break
+    const ag = new Set(anchor.genres)
+    const sims = scoped.value
+      .filter((m) => m.id !== anchor.id && !used.has(m.id) && isRecommendable(m) && (m.genres || []).some((g) => ag.has(g)))
+      .map((m) => ({ m, n: (m.genres || []).filter((g) => ag.has(g)).length }))
+      .sort((a, b) => b.n - a.n || (b.m.rating || 0) - (a.m.rating || 0))
+      .slice(0, 14)
+      .map((x) => x.m)
+    if (sims.length >= 4) {
+      sims.forEach((m) => used.add(m.id))
+      out.push({ anchor, items: sims })
+    }
+  }
+  return out
+})
+
 /** 首页 Hero 精选：从当前来源里「较高分且有背景/海报」的一批**随机挑 6 部**，可「换一批」刷新
  * （不再永远是评分最高那几部）。合集/合集成员不参与。 */
 const featuredList = ref<MediaItem[]>([])
@@ -1773,6 +1822,8 @@ export function useLibrary() {
     filtered,
     continueWatching,
     recentlyAdded,
+    forYou,
+    becauseYouWatched,
     movies,
     series,
     collections,

@@ -84,9 +84,11 @@ function scroll(dir: number) {
   grid-auto-columns: var(--col);
   gap: 18px;
   overflow-x: auto;
-  /* 上下留白，避免卡片 hover 上移/放大被裁剪（海报卡有 scale，需更多余量） */
-  padding: 14px 4px 10px;
-  margin-top: -14px;
+  /* 三者配合让首卡「与上面 tab/大卡片对齐」又「hover 描边/阴影不被裁」：
+     padding 给裁剪留白 + 等量负 margin 把首卡拉回对齐(父容器有 ≥34px 内边距可容纳) + scroll-padding 防聚焦滚动把卡片推到边被裁 */
+  padding: 14px 18px 12px;
+  margin: -14px -18px 0;
+  scroll-padding-inline: 18px;
   scroll-snap-type: x proximity;
 }
 .row__track > :deep(*) {
