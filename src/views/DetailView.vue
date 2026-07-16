@@ -218,6 +218,16 @@ watch(
     if (it?.id.startsWith('local-series:')) void loadEpisodeNames(it)
   }
 )
+// 续看集前进后（连播跳集 E5→E6，播放结束 refreshAfterPlayback 更新了 nextUp）：
+// 若用户没手动聚焦过某集，selectedEp 跟随新的续看集——否则点「播放」仍用旧 selectedEp
+// （跳集前那一集 + 旧进度），与详情页显示的续看集(resumeId 计算属性、已更新)不一致 → 续播错集/错进度
+watch(resumeId, () => {
+  if (epFocused.value) return
+  const it = item.value
+  if (it?.type !== 'series') return
+  const ep = player.resumeEpisodeOf(it)
+  if (ep) selectedEp.value = ep
+})
 // 聚焦集变化 → 加载该集文件信息/轨道 + 重置该集的轨道预选
 watch(selectedEp, (ep) => {
   if (!ep) return
