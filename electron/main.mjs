@@ -721,6 +721,18 @@ ipcMain.handle('pick-folder', async () => {
   return r.canceled || !r.filePaths.length ? null : r.filePaths[0]
 })
 
+// 选择本地文件（IPTV 频道清单：.m3u/.txt）
+ipcMain.handle('pick-file', async () => {
+  const r = await dialog.showOpenDialog(mainWin ?? undefined, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'IPTV 频道清单', extensions: ['m3u', 'm3u8', 'txt'] },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  })
+  return r.canceled || !r.filePaths.length ? null : r.filePaths[0]
+})
+
 // 递归扫描目录下所有视频（本机源进媒体库用）；限深/限量，避免超大目录卡死
 async function scanVideos(dir, out, depth, base = dir) {
   if (out.length >= 4000 || depth > 8) return
@@ -1065,6 +1077,86 @@ ipcMain.handle('scan-dlna', async (_e, config) => {
     return { videos: out.filter((v) => !seen.has(v.path) && seen.add(v.path)) }
   } catch (e) {
     return { error: e.message }
+  }
+})
+
+// ---------- IPTV 直播源（解析 M3U / TXT 频道清单，供直播页播放）----------
+const STREAM_RE = /^(https?|rtmp|rtsp|udp|mms):/i
+// M3U：#EXTINF:-1 tvg-logo="..." group-title="...",频道名 \n 流地址
+function parseIptvM3u(content) {
+  const map = new Map()
+  let pending = null
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    if (/^#EXTINF/i.test(line)) {
+      pending = {
+        name: line.slice(line.lastIndexOf(',') + 1).trim() || '未命名',
+        logo: line.match(/tvg-logo="([^"]*)"/i)?.[1] || '',
+        group: line.match(/group-title="([^"]*)"/i)?.[1] || ''
+      }
+    } else if (!line.startsWith('#') && pending) {
+      addChannel(map, pending.name, pending.group, pending.logo, line)
+      pending = null
+    }
+  }
+  return [...map.values()]
+}
+// TXT：频道名,流地址（每行一个）；分组名,#genre# 作分组标题；同名多源归并
+function parseIptvText(content) {
+  const map = new Map()
+  let group = ''
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const i = line.indexOf(',')
+    if (i < 0) continue
+    const name = line.slice(0, i).trim()
+    const url = line.slice(i + 1).trim()
+    if (/^#genre#/i.test(url)) { group = name; continue } // 分组标题
+    addChannel(map, name, group, '', url)
+  }
+  return [...map.values()]
+}
+function addChannel(map, name, group, logo, url) {
+  if (!name || !url) return
+  if (/^\u66f4\u65b0\u65f6\u95f4/.test(name)) return // \u5143\u6570\u636e\u884c
+  if (/^https?:\/\/(127\.0\.0\.1|localhost)\/?$/i.test(url)) return
+  if (!STREAM_RE.test(url)) return
+  const key = group + '\t' + name // 同组同名归并（多源）
+  let ch = map.get(key)
+  if (!ch) {
+    ch = { name, group, logo, urls: [] }
+    map.set(key, ch)
+  }
+  if (logo && !ch.logo) ch.logo = logo
+  if (!ch.urls.includes(url)) ch.urls.push(url)
+}
+function parseIptv(content) {
+  return /^\s*#EXTM3U/i.test(content) ? parseIptvM3u(content) : parseIptvText(content)
+}
+// 拉取/读取 IPTV 清单（http 直链或本地文件）并解析成频道列表
+ipcMain.handle('scan-iptv', async (_e, config) => {
+  const src = (config?.url || '').trim()
+  if (!src) return { error: '缺少 IPTV 地址或文件' }
+  try {
+    let content
+    if (/^https?:\/\//i.test(src)) {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15000)
+      try {
+        const res = await fetch(src, { headers: { 'User-Agent': 'NekoPlayer' }, signal: ctrl.signal })
+        if (!res.ok) return { error: `拉取失败（HTTP ${res.status}）` }
+        content = await res.text()
+      } finally {
+        clearTimeout(timer)
+      }
+    } else {
+      content = readFileSync(src, 'utf-8') // 本地文件
+    }
+    return { channels: parseIptv(content) }
+  } catch (e) {
+    return { error: e.name === 'AbortError' ? '请求超时（源无响应）' : e.message }
   }
 })
 

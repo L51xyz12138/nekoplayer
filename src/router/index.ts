@@ -36,6 +36,11 @@ export const router = createRouter({
       component: () => import('@/views/StatsView.vue')
     },
     {
+      path: '/live',
+      name: 'live',
+      component: () => import('@/views/LiveView.vue')
+    },
+    {
       path: '/sources',
       name: 'sources',
       component: () => import('@/views/SourcesView.vue')

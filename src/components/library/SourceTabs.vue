@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { type Component, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { type Component, computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Layers, Server, HardDrive, Cloud, Network, Cast, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
 import { sourceKindMeta } from '@/data/sourceKinds'
 import type { SourceKind } from '@/types/source'
 
-// 只显示启用的源（停用的不进媒体库、也不占标签位）
+// 只显示启用的影视源（停用的不进媒体库、也不占标签位；IPTV 是直播源、不进影视库标签）
 const { enabledSources } = useSources()
+const libSources = computed(() => enabledSources.value.filter((s) => s.kind !== 'iptv'))
 const { activeSourceId, setActiveSource } = useLibrary()
 
 const kindIcon: Partial<Record<SourceKind, Component>> = {
@@ -48,7 +49,7 @@ onMounted(() => {
   window.addEventListener('resize', update)
 })
 onBeforeUnmount(() => window.removeEventListener('resize', update))
-watch(enabledSources, () => nextTick(update))
+watch(libSources, () => nextTick(update))
 </script>
 
 <template>
@@ -59,7 +60,7 @@ watch(enabledSources, () => nextTick(update))
         全部资料库
       </button>
       <button
-        v-for="s in enabledSources"
+        v-for="s in libSources"
         :key="s.id"
         class="stab"
         :class="{ on: activeSourceId === s.id }"

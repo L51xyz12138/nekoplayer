@@ -86,6 +86,10 @@ async function pickFolder(key: string) {
   const p = await window.nekoNative?.pickFolder()
   if (p) form[key] = p
 }
+async function pickFile(key: string) {
+  const p = await window.nekoNative?.pickFile()
+  if (p) form[key] = p
+}
 
 // DLNA：SSDP 发现局域网服务器，选一个填入 config
 const discovering = ref(false)
@@ -114,7 +118,8 @@ const isFileKind = computed(
     kind.value === 'local' ||
     kind.value === 'webdav' ||
     kind.value === 'smb' ||
-    kind.value === 'dlna'
+    kind.value === 'dlna' ||
+    kind.value === 'iptv'
 )
 
 // 从表单收集 config，并校验必填；返回 null 表示校验未过（已设置错误提示）
@@ -127,10 +132,12 @@ function collectConfig(): { config: Record<string, string>; address: string; der
     return null
   }
   let derived = ''
-  try {
-    if (config.url) derived = new URL(config.url).host
-  } catch {
-    /* url 非法交给后端报错 */
+  if (config.url) {
+    try {
+      derived = new URL(config.url).host
+    } catch {
+      derived = config.url.split(/[\\/]/).filter(Boolean).pop() || '' // 本地文件路径取文件名
+    }
   }
   if (!derived) derived = config.address || config.path?.split(/[\\/]/).filter(Boolean).pop() || ''
   return { config, address: config.url || config.address || config.path || '', derived }
@@ -270,6 +277,10 @@ async function submit() {
                 <p v-else-if="discovered" class="dlna-hint">
                   没搜到服务器（确认在同一局域网、DLNA/UPnP 已开启）
                 </p>
+              </div>
+              <div v-else-if="f.type === 'iptv'" class="field__folder">
+                <input v-model="form[f.key]" type="text" :placeholder="f.placeholder" spellcheck="false" />
+                <button type="button" class="field__browse" @click="pickFile(f.key)">选择文件…</button>
               </div>
               <div v-else-if="f.type === 'password'" class="field__pwd">
                 <input

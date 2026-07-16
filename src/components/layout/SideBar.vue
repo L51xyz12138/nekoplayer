@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { BarChart3, Clapperboard, Server, Settings, Tv } from 'lucide-vue-next'
+import { BarChart3, Clapperboard, Radio, Server, Settings, Tv } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useTrakt } from '@/composables/useTrakt'
+import { useIptv } from '@/composables/useIptv'
 
 const route = useRoute()
 const trakt = useTrakt()
+const { hasIptv } = useIptv()
 
-// 连接 Trakt 后才出现「Trakt」入口
+// 有 IPTV 源才出现「直播」、连接 Trakt 后才出现「Trakt」入口
 const items = computed(() => [
   { name: 'library', label: '媒体库', icon: Clapperboard, to: '/' },
+  ...(hasIptv.value ? [{ name: 'live', label: '直播', icon: Radio, to: '/live' }] : []),
   { name: 'stats', label: '统计', icon: BarChart3, to: '/stats' },
   ...(trakt.connected.value ? [{ name: 'trakt', label: 'Trakt', icon: Tv, to: '/trakt' }] : []),
   { name: 'sources', label: '媒体源', icon: Server, to: '/sources' },

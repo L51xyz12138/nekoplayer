@@ -28,7 +28,9 @@ contextBridge.exposeInMainWorld('nekoNative', {
   storeRemove: (key) => ipcRenderer.send('store-remove', key),
   // 文件浏览类源：本机(选文件夹+扫视频) / WebDAV / SMB + 视频缩略图
   pickFolder: () => ipcRenderer.invoke('pick-folder'),
+  pickFile: () => ipcRenderer.invoke('pick-file'),
   scanVideos: (root) => ipcRenderer.invoke('scan-videos', root),
+  scanIptv: (config) => ipcRenderer.invoke('scan-iptv', config),
   scanWebdav: (config) => ipcRenderer.invoke('scan-webdav', config),
   scanSmb: (config) => ipcRenderer.invoke('scan-smb', config),
   discoverDlna: () => ipcRenderer.invoke('discover-dlna'),

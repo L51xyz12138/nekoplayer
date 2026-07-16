@@ -69,6 +69,15 @@ export const sourceKinds: SourceKindMeta[] = [
     fields: [{ key: 'controlUrl', label: 'DLNA 服务器', type: 'dlna', required: true }]
   },
   {
+    kind: 'iptv',
+    label: 'IPTV 直播',
+    description: '接入 IPTV 直播源（M3U / TXT 频道清单），在「直播」页看电视直播',
+    accent: '#ff5c7a',
+    fields: [
+      { key: 'url', label: '清单地址或本地文件', placeholder: 'http://… 的 m3u/txt，或选择本地文件', type: 'iptv', required: true }
+    ]
+  },
+  {
     kind: 'plex',
     label: 'Plex',
     description: '连接 Plex Media Server，畅享海量在线元数据',

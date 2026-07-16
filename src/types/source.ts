@@ -1,6 +1,6 @@
 import type { EmbySession } from '@/api/emby'
 
-export type SourceKind = 'emby' | 'jellyfin' | 'plex' | 'local' | 'webdav' | 'smb' | 'dlna'
+export type SourceKind = 'emby' | 'jellyfin' | 'plex' | 'local' | 'webdav' | 'smb' | 'dlna' | 'iptv'
 
 export type SourceStatus = 'online' | 'offline' | 'connecting'
 
@@ -24,7 +24,7 @@ export interface SourceField {
   key: string
   label: string
   placeholder?: string
-  type: 'text' | 'password' | 'number' | 'folder' | 'dlna'
+  type: 'text' | 'password' | 'number' | 'folder' | 'dlna' | 'iptv'
   required?: boolean
   defaultValue?: string
 }

@@ -216,6 +216,20 @@ function playFile(
   }
 }
 
+/** 播放直播流（IPTV 频道）：外部播放器直接播 URL，无进度/无 scrobble（直播无固定时长）；player 可指定播放器、缺省用设置里的默认 */
+function playLive(url: string, title: string, player?: string) {
+  const native = window.nekoNative
+  if (!native?.playMpv) return
+  const { settings } = useSettings()
+  player = player || settings.playerMode
+  if (player === 'mpv') {
+    native.playMpv([{ url, title }], title, 0, settings.playerPaths.mpv || '')
+  } else if (native.playExternal) {
+    const key = player.toLowerCase()
+    native.playExternal(key, url, settings.playerPaths[key] || '')
+  }
+}
+
 export function usePlayer() {
-  return { play, playWith, playFile, resumeEpisodeOf }
+  return { play, playWith, playFile, playLive, resumeEpisodeOf }
 }

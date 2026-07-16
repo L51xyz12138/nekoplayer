@@ -7,20 +7,28 @@ import AddSourceDialog from '@/components/source/AddSourceDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useSources } from '@/composables/useSources'
 import { useLibrary } from '@/composables/useLibrary'
+import { useIptv } from '@/composables/useIptv'
 import type { MediaSource } from '@/types/source'
 
 const router = useRouter()
 const { sources, addSource, updateSource, toggleSource, removeSource } = useSources()
 const { setActiveSource, loadFromEmby } = useLibrary()
+const { loadChannels } = useIptv()
+
+// 源变更后：重新聚合影视库（Emby/文件源）+ 重新拉 IPTV 频道
+function refreshAll() {
+  loadFromEmby()
+  loadChannels()
+}
 
 // 新增/编辑源后都要重新聚合媒体库（否则文件源加了却不扫描、编辑了连接也不生效）
 function onAdd(s: MediaSource) {
   addSource(s)
-  loadFromEmby()
+  refreshAll()
 }
 function onUpdate(s: MediaSource) {
   updateSource(s)
-  loadFromEmby()
+  refreshAll()
 }
 
 // 删除媒体源：先二次确认，确认后再移除并重新聚合剩余源
@@ -31,14 +39,14 @@ function remove(id: string) {
 function confirmRemove() {
   if (pendingRemove.value) {
     removeSource(pendingRemove.value.id)
-    loadFromEmby()
+    refreshAll()
   }
   pendingRemove.value = null
 }
 // 启用 / 停用源后刷新媒体库
 function toggle(id: string) {
   toggleSource(id)
-  loadFromEmby()
+  refreshAll()
 }
 
 const dialogOpen = ref(false)
@@ -59,7 +67,12 @@ function closeDialog() {
 function browse(source: MediaSource) {
   // 停用的源不进媒体库，点击不跳转
   if (!source.enabled) return
-  // 所有启用的源（含本机存储）都进聚合媒体库，按该源过滤（本机视频已并入库）
+  // IPTV 是直播源、不进影视库 → 点击去「直播」页
+  if (source.kind === 'iptv') {
+    router.push('/live')
+    return
+  }
+  // 其余启用的源（含本机存储）都进聚合媒体库，按该源过滤（本机视频已并入库）
   setActiveSource(source.id)
   router.push('/')
 }

@@ -79,6 +79,10 @@ export interface NekoNative {
   storeRemove(key: string): void
   /** 选择文件夹（添加本机存储源）；取消返回 null */
   pickFolder(): Promise<string | null>
+  /** 选择本地文件（IPTV 频道清单 .m3u/.txt）；取消返回 null */
+  pickFile(): Promise<string | null>
+  /** 拉取/读取 IPTV 清单（http 直链或本地文件路径）并解析成频道列表 */
+  scanIptv(config: Record<string, string>): Promise<{ channels?: IptvChannel[]; error?: string }>
   /** 递归扫描本机目录下所有视频（path 为本地绝对路径） */
   scanVideos(root: string): Promise<{ videos?: NekoVideoFile[]; error?: string }>
   /** 递归列 WebDAV 视频（path 为带认证的直链） */
@@ -136,6 +140,17 @@ export interface NekoTrackInfo {
 export interface DlnaServer {
   name: string
   controlUrl: string
+}
+
+/** IPTV 频道（同名多源已归并到 urls） */
+export interface IptvChannel {
+  name: string
+  /** 分组（央视/卫视…），无则空 */
+  group: string
+  /** 台标 URL，无则空 */
+  logo: string
+  /** 直播流地址（可能多个源，播放优先用第一个） */
+  urls: string[]
 }
 
 /** 递归扫描到的视频文件 */
