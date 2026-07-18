@@ -68,6 +68,8 @@ onMounted(() => {
         </div>
       </transition>
       <div v-if="backdropUrl" class="app__bg-scrim" :class="{ 'is-focus': backdropMode === 'focus' }" />
+      <!-- 详情页 focus：左侧渐进磨砂层（文字区），向右渐隐露出清晰海报 -->
+      <div v-if="backdropUrl && backdropMode === 'focus'" class="app__bg-frost" />
     </div>
 
     <!-- 自绘标题栏：图标+标题顶格左上，窗口按钮右上（win），中间可拖拽 -->
@@ -195,27 +197,41 @@ onMounted(() => {
   filter: blur(40px) saturate(1.35);
   transform: scale(1.08);
 }
-/* 清晰叠层：中间偏上清晰、径向遮罩向四周淡出露出下层模糊（详情页整窗大海报效果） */
+/* 清晰叠层：右上方清晰、径向遮罩向左/下淡出露出下层模糊（详情页大海报右锚，左侧让给文字区） */
 .app__bg-sharp {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  -webkit-mask-image: radial-gradient(122% 90% at 50% 24%, #000 32%, transparent 78%);
-  mask-image: radial-gradient(122% 90% at 50% 24%, #000 32%, transparent 78%);
+  -webkit-mask-image: radial-gradient(115% 95% at 76% 20%, #000 30%, transparent 74%);
+  mask-image: radial-gradient(115% 95% at 76% 20%, #000 30%, transparent 74%);
 }
 .app__bg-scrim {
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg, var(--scrim-1), var(--scrim-2));
 }
-/* 详情页 focus：一条平滑的全宽底部渐深遮罩（顶部透出清晰大海报、往下渐暗给简介/内容垫底）——不再有局部黑块 */
+/* 详情页 focus：纵向底部渐深到背景色（全宽），给下方剧集/演职人员内容垫底 */
 .app__bg-scrim.is-focus {
-  background: linear-gradient(180deg, transparent 0%, transparent 18%, rgba(8, 9, 13, 0.5) 52%, rgba(8, 9, 13, 0.86) 100%);
+  background: linear-gradient(180deg, transparent 0%, transparent 30%, color-mix(in srgb, var(--bg-1) 70%, transparent) 62%, var(--bg-1) 96%);
 }
-:root[data-scheme='light'] .app__bg-scrim.is-focus {
-  background: linear-gradient(180deg, transparent 0%, transparent 18%, rgba(238, 242, 248, 0.55) 52%, rgba(245, 247, 251, 0.92) 100%);
+/* 详情页 focus 文字区：渐进磨砂——左侧强磨砂 + 一层薄色罩保证文字对比度，
+   经 mask 向右渐隐、露出右侧清晰海报；随主题变量翻转，亮暗主题都是磨砂玻璃质感 */
+.app__bg-frost {
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(56px) saturate(1.12);
+  -webkit-backdrop-filter: blur(56px) saturate(1.12);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
+    color-mix(in srgb, var(--bg-1) 34%, transparent) 38%,
+    transparent 68%
+  );
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.72) 38%, rgba(0, 0, 0, 0.22) 58%, transparent 76%);
+  mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.72) 38%, rgba(0, 0, 0, 0.22) 58%, transparent 76%);
+  pointer-events: none;
 }
 .bgfade-enter-active,
 .bgfade-leave-active {

@@ -71,16 +71,16 @@ const topActors = computed(() => {
   return [...map.values()].sort((a, b) => b.count - a.count).slice(0, 12)
 })
 
-// 评分分布（Trakt）：1-10 分各多少部
+// 评分分布（Trakt）：只画有评分的档位（10 档里大多是 0 时不再刷一排空条）
 const ratingBars = computed(() => {
   const dist = stats.value?.ratingsDist
   if (!dist) return []
-  const max = Math.max(1, ...Object.values(dist).map((v) => Number(v) || 0))
-  return Array.from({ length: 10 }, (_, i) => {
-    const score = String(i + 1)
-    const count = Number(dist[score]) || 0
-    return { score: i + 1, count, pct: Math.round((count / max) * 100) }
-  })
+  const rows = Array.from({ length: 10 }, (_, i) => ({
+    score: i + 1,
+    count: Number(dist[String(i + 1)]) || 0
+  })).filter((r) => r.count > 0)
+  const max = Math.max(1, ...rows.map((r) => r.count))
+  return rows.map((r) => ({ ...r, pct: Math.round((r.count / max) * 100) }))
 })
 const hasRatings = computed(() => ratingBars.value.some((r) => r.count > 0))
 

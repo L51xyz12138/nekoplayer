@@ -198,10 +198,11 @@ function tile(name: string): string {
                 @load="onLogoLoad($event, logoSrc(c))"
                 @error="onLogoErr(logoSrc(c))"
               />
-              <span class="ch__name">{{ c.name }}</span>
+              <span v-if="!showLogo(c)" class="ch__face">{{ c.name }}</span>
               <span v-if="c.urls.length > 1" class="ch__src">{{ c.urls.length }}源</span>
               <span class="ch__play"><Play :size="24" fill="currentColor" /></span>
             </div>
+            <span class="ch__name">{{ c.name }}</span>
           </button>
         </div>
       </section>
@@ -398,13 +399,19 @@ function tile(name: string): string {
 .live__group {
   margin-bottom: 26px;
 }
+/* 分组标题吸顶：滚动长清单时始终知道自己在哪个分组（渐变底避免硬边切掉卡片） */
 .live__gtitle {
+  position: sticky;
+  top: -26px;
+  z-index: 5;
   display: flex;
   align-items: baseline;
   gap: 8px;
+  margin: -6px -8px 12px;
+  padding: 8px 8px 10px;
   font-size: 16px;
   font-weight: 700;
-  margin-bottom: 14px;
+  background: linear-gradient(180deg, var(--bg-1) 72%, transparent);
 }
 .live__gtitle span {
   font-size: 12px;
@@ -413,18 +420,18 @@ function tile(name: string): string {
 }
 .live__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 16px 14px;
 }
 .ch {
   cursor: pointer;
 }
-/* 所有子元素都绝对定位 → 盒子严格保持 16:10、卡片尺寸统一（不被频道名长度撑高） */
+/* 台标 tile：固定浅色底（台标多为深色素描设计在白/透明底上，深色主题下也保持浅色才不发灰） */
 .ch__box {
   position: relative;
   aspect-ratio: 16 / 10;
   border-radius: var(--r-md);
-  background: var(--surface);
+  background: linear-gradient(165deg, #ffffff, #eef0f4);
   border: 1px solid var(--border);
   overflow: hidden;
   transition: border-color var(--dur) var(--ease), transform var(--dur) var(--ease),
@@ -441,15 +448,15 @@ function tile(name: string): string {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 12px 12px 24px;
+  padding: 16px 18px;
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
 }
 .ch__box.is-logo .ch__logo {
   opacity: 1;
 }
-/* 默认（无台标）：频道名居中当「文字台标」，铺在彩色块上 */
-.ch__name {
+/* 无台标：频道名居中当「文字台标」，铺在彩色渐变块上 */
+.ch__face {
   position: absolute;
   inset: 0;
   display: grid;
@@ -464,18 +471,23 @@ function tile(name: string): string {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
-/* 有台标：频道名收到底部当小标签、给台标让出空间 */
-.ch__box.is-logo .ch__name {
-  inset: auto 0 0 0;
+/* 频道名外置在 tile 下方（不再压台标），单行省略 */
+.ch__name {
   display: block;
-  padding: 16px 8px 5px;
-  font-size: 11.5px;
+  margin-top: 8px;
+  padding: 0 2px;
+  font-size: 12.5px;
   font-weight: 600;
-  line-height: 1.2;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  line-height: 1.3;
+  color: var(--text-dim);
+  text-align: center;
   white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: none;
+  transition: color var(--dur) var(--ease);
+}
+.ch:hover .ch__name {
+  color: var(--text);
 }
 .ch__play {
   position: absolute;
@@ -556,6 +568,10 @@ function tile(name: string): string {
   border-radius: var(--r-sm);
   overflow: hidden;
   color: #fff;
+}
+.ldlg__logo.is-logo {
+  background: linear-gradient(165deg, #ffffff, #eef0f4);
+  border: 1px solid var(--border);
 }
 .ldlg__logo img {
   width: 100%;

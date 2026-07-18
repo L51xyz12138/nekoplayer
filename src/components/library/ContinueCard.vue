@@ -18,12 +18,24 @@ function open() {
 const nextUp = computed(() => props.item.nextUp)
 const progress = computed(() => nextUp.value?.progress ?? props.item.progress ?? 0)
 const still = computed(() => nextUp.value?.stillUrl || props.item.backdropUrl)
+// 剩余时长：电影为片长×剩余比例；剧集用单集均长估算（NextUp 不带单集时长）
 const remain = computed(() => Math.round(props.item.runtime * (1 - progress.value)))
-const info = computed(() =>
-  nextUp.value
-    ? `S${nextUp.value.season}E${nextUp.value.episode} · ${nextUp.value.title}`
-    : `剩余 ${remain.value} 分钟`
-)
+const remainText = computed(() => {
+  const m = remain.value
+  if (m <= 0) return ''
+  if (m < 60) return `剩 ${m} 分钟`
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  return mm ? `剩 ${h} 小时 ${mm} 分钟` : `剩 ${h} 小时`
+})
+const info = computed(() => {
+  if (nextUp.value) {
+    const base = `S${nextUp.value.season}E${nextUp.value.episode} · ${nextUp.value.title}`
+    // 只有真的看了一部分（有进度）才标剩余，全新一集标剩余没意义
+    return nextUp.value.progress ? `${base} · ${remainText.value}` : base
+  }
+  return remainText.value
+})
 </script>
 
 <template>

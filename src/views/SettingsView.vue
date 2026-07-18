@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Check, Palette, Film, Captions, Info, Clapperboard, Github, Tv } from 'lucide-vue-next'
+import { Check, Palette, Film, Captions, Info, Clapperboard, Github, Tv, Eye, EyeOff } from 'lucide-vue-next'
 import Segmented from '@/components/common/Segmented.vue'
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { useSettings } from '@/composables/useSettings'
@@ -13,6 +13,10 @@ const { settings, themes } = useSettings()
 const trakt = useTrakt()
 const update = useUpdate()
 const subColors = ['#ffffff', '#ffce53', '#7fe7ff', '#a0ff9d']
+
+// API Key / Token 默认密文显示（防路过窥屏），点眼睛临时明文核对
+const showTmdbKey = ref(false)
+const showAssrtToken = ref(false)
 
 // 按当前平台提供可选播放器
 const platform = window.nekoNative?.platform ?? 'darwin'
@@ -203,12 +207,24 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
               <h4>TMDB API Key</h4>
               <p>填入后，本机 / WebDAV / SMB / DLNA 的视频自动匹配海报与信息；留空则只显示 mpv 缩略图。Emby / Jellyfin 由服务器自己刮，不受此影响。免费申请：themoviedb.org → 设置 → API</p>
             </div>
-            <input
-              v-model="settings.tmdbKey"
-              class="path-input"
-              placeholder="TMDB v3 API Key"
-              spellcheck="false"
-            />
+            <div class="secret">
+              <input
+                v-model="settings.tmdbKey"
+                class="path-input"
+                :type="showTmdbKey ? 'text' : 'password'"
+                placeholder="TMDB v3 API Key"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button
+                class="secret__eye"
+                :title="showTmdbKey ? '隐藏' : '显示'"
+                @click="showTmdbKey = !showTmdbKey"
+              >
+                <Eye v-if="showTmdbKey" :size="16" />
+                <EyeOff v-else :size="16" />
+              </button>
+            </div>
           </div>
           <div class="row">
             <div class="row__label"><h4>刮削语言</h4><p>匹配到的标题 / 简介语言</p></div>
@@ -219,12 +235,24 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
               <h4>assrt 字幕 Token（在线字幕）</h4>
               <p>填入后，文件源详情页出现「在线字幕」按钮，可按片名搜索下载字幕（仅 mpv 生效）。字幕服务由 <a href="https://assrt.net" target="_blank" rel="noreferrer">assrt.net</a> 提供；免费注册登录后在用户面板查看 Token（额度 20 次/分）。留空则不启用。</p>
             </div>
-            <input
-              v-model="settings.assrtToken"
-              class="path-input"
-              placeholder="assrt API Token（留空不启用）"
-              spellcheck="false"
-            />
+            <div class="secret">
+              <input
+                v-model="settings.assrtToken"
+                class="path-input"
+                :type="showAssrtToken ? 'text' : 'password'"
+                placeholder="assrt API Token（留空不启用）"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button
+                class="secret__eye"
+                :title="showAssrtToken ? '隐藏' : '显示'"
+                @click="showAssrtToken = !showAssrtToken"
+              >
+                <Eye v-if="showAssrtToken" :size="16" />
+                <EyeOff v-else :size="16" />
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -547,6 +575,33 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
 }
 .path-input:focus {
   border-color: var(--accent);
+}
+/* 密钥输入：眼睛切换明文/密文 */
+.secret {
+  position: relative;
+  flex-shrink: 0;
+  width: 280px;
+}
+.secret .path-input {
+  width: 100%;
+  padding-right: 40px;
+}
+.secret__eye {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--text-mute);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.secret__eye:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 /* Trakt 连接 */

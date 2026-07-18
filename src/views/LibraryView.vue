@@ -2,9 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { FolderTree, LayoutGrid, ChevronLeft, ChevronRight, RotateCw } from 'lucide-vue-next'
-import TopBar from '@/components/layout/TopBar.vue'
-import SourceTabs from '@/components/library/SourceTabs.vue'
-import LibraryTabs from '@/components/library/LibraryTabs.vue'
+import LibraryToolbar from '@/components/library/LibraryToolbar.vue'
 import HeroBanner from '@/components/library/HeroBanner.vue'
 import MediaRow from '@/components/library/MediaRow.vue'
 import PosterGrid from '@/components/library/PosterGrid.vue'
@@ -28,8 +26,6 @@ const {
   items,
   query,
   category,
-  sort,
-  counts,
   activeFilterCount,
   filtered,
   continueWatching,
@@ -48,10 +44,7 @@ const {
   bySource,
   fileViewMode,
   setFileViewMode,
-  toggleFavorite,
-  setQuery,
-  setCategory,
-  setSort
+  toggleFavorite
 } = useLibrary()
 
 // 文件源「库视图」用的网格：当前源全部条目按标题排序（系列电影成员收进合集卡、不单列）
@@ -139,17 +132,7 @@ function play(item: MediaItem) {
 <template>
   <div class="library">
     <div class="library__topbar">
-      <SourceTabs />
-      <LibraryTabs />
-      <TopBar
-        :query="query"
-        :category="category"
-        :sort="sort"
-        :counts="counts"
-        @update:query="setQuery"
-        @update:category="setCategory"
-        @update:sort="setSort"
-      />
+      <LibraryToolbar />
     </div>
 
     <div class="library__scroll">
@@ -329,7 +312,11 @@ function play(item: MediaItem) {
 }
 .library__topbar {
   flex-shrink: 0;
-  padding: 20px 34px 0;
+  padding: 14px 34px 0;
+  /* 抬升层级：.ltoolbar 的 backdrop-filter 会形成堆叠上下文，把下拉菜单的 z-index 关在里面，
+     不把整条 topbar 抬起来，下拉会被后面的 Hero 横幅盖住 */
+  position: relative;
+  z-index: 30;
 }
 .library__scroll {
   flex: 1;

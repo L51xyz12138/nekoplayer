@@ -128,7 +128,7 @@ function errorFor(s: MediaSource): string {
 .src--off .src__main,
 .src--off .src__status,
 .src--off .src__count {
-  opacity: 0.42;
+  opacity: 0.62;
 }
 
 .src__icon {

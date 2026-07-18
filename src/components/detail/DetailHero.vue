@@ -152,21 +152,17 @@ const players: string[] = nn?.playMpv
   font-weight: 800;
   line-height: 1.06;
   letter-spacing: -0.01em;
-  /* 固定亮色（不随主题翻转）——hero 背景是暗色遮罩过的海报，亮色 + 阴影两个主题都清晰 */
-  color: #fff;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 2px 28px rgba(0, 0, 0, 0.5);
+  /* 文字落在全局 focus 遮罩的左侧安全区（近纯背景色）→ 随主题翻转的正文色即可，不再固定白字压亮海报 */
+  color: var(--text);
 }
 .dhero__tagline {
   margin-top: 10px;
   font-size: 15px;
   font-style: italic;
-  color: rgba(255, 255, 255, 0.72);
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+  color: var(--text-mute);
 }
 .dhero__info :deep(.meta) {
   margin-top: 16px;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 .dhero__genres {
   display: flex;
@@ -179,29 +175,35 @@ const players: string[] = nn?.playMpv
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-dim);
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
+  backdrop-filter: var(--blur);
 }
 .dhero__overview {
   margin-top: 16px;
   font-size: 15px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.94);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 1px 16px rgba(0, 0, 0, 0.7);
+  color: var(--text-dim);
 }
+/* 续看进度：磨砂卡片承载，不再是海报上的一条细线 */
 .dhero__progress {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-top: 18px;
   max-width: 460px;
+  padding: 11px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  backdrop-filter: var(--blur);
 }
 .dhero__progress-track {
   flex: 1;
   height: 6px;
   border-radius: var(--r-pill);
-  background: var(--surface-2);
+  background: var(--surface-hover);
   overflow: hidden;
 }
 .dhero__progress-track span {

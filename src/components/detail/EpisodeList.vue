@@ -27,10 +27,14 @@ function seasonOfEp(id?: string): number | undefined {
 }
 function scrollToResume() {
   if (!props.resumeId) return
-  const node = track.value?.querySelector<HTMLElement>(
-    `[data-ep-id="${CSS.escape(props.resumeId)}"]`
-  )
-  node?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  const el = track.value
+  const node = el?.querySelector<HTMLElement>(`[data-ep-id="${CSS.escape(props.resumeId)}"]`)
+  if (!el || !node) return
+  // 只横向滚动剧集行（不能用 scrollIntoView：block:'nearest' 会把整页垂直拉下去，进详情页落点就不在顶部了）
+  const elRect = el.getBoundingClientRect()
+  const nRect = node.getBoundingClientRect()
+  const left = el.scrollLeft + (nRect.left - elRect.left) - el.clientWidth / 2 + nRect.width / 2
+  el.scrollTo({ left, behavior: 'smooth' })
 }
 watch(
   () => props.resumeId,
@@ -41,6 +45,24 @@ watch(
   },
   { immediate: true }
 )
+
+// 判断标题是不是「没刮削到元数据的原始文件名」（字幕组命名 / S01E01 / 直接就是文件名）
+function isRawName(title: string): boolean {
+  const s = title.trim()
+  if (!s) return true
+  if (/\.(mkv|mp4|avi|mov|wmv|flv|webm|m2ts|ts|rmvb|mpg|mpeg|iso)$/i.test(s)) return true
+  if (/^s\d{1,2}e\d{1,3}\b/i.test(s)) return true // S01E03 开头（含文件源兜底的 "S1E3" 整串）
+  // 典型发布组命名：带 [字幕组] / 【字幕组】且含清晰度、编码等技术标签
+  if (/[\[【][^\]】]*[\]】]/.test(s) && /(\d{3,4}p|x26[45]|hevc|avc|flac|aac2?|ma10p|10bit|8bit|bdrip|web[- ]?dl)/i.test(s))
+    return true
+  return false
+}
+// 主标题：真标题 → 「第 N 集 · 标题」；文件名 → 只留「第 N 集」，文件名降级成小字
+function mainTitle(ep: Episode): string {
+  const n = ep.episode > 0 ? `第 ${ep.episode} 集` : ''
+  if (isRawName(ep.title)) return n || '未编号'
+  return n ? `${n} · ${ep.title}` : ep.title
+}
 </script>
 
 <template>
@@ -93,8 +115,9 @@ watch(
           <div v-if="ep.progress" class="ep__bar"><span :style="{ width: ep.progress * 100 + '%' }" /></div>
         </div>
         <div class="ep__info">
-          <h3 class="ep__name">{{ ep.episode }}. {{ ep.title }}</h3>
-          <p class="ep__overview clamp-2">{{ ep.overview }}</p>
+          <h3 class="ep__name" :class="{ 'ep__name--plain': isRawName(ep.title) }">{{ mainTitle(ep) }}</h3>
+          <p v-if="isRawName(ep.title)" class="ep__file" :title="ep.title">{{ ep.title }}</p>
+          <p v-if="ep.overview" class="ep__overview clamp-2">{{ ep.overview }}</p>
         </div>
       </article>
     </div>
@@ -285,6 +308,21 @@ watch(
 .ep__name {
   font-size: 14.5px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 没刮到元数据：主标题只显示「第 N 集」，弱化一点，把识别度让给缩略图 */
+.ep__name--plain {
+  font-weight: 650;
+  color: var(--text-dim);
+}
+/* 原始文件名降级成弱化小字（仍可见、hover 有完整 title） */
+.ep__file {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-mute);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
