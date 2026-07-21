@@ -3,12 +3,13 @@
 // Emby/Jellyfin 由服务器提供字幕，不走此模块。
 import { useSettings } from '@/composables/useSettings'
 
-// assrt token 由用户在设置里各自填自己的（免费注册，额度 20 次/分按 token+IP 共享，故不内置公用 token）。
-// 留 ASSRT_TOKEN 作可选的内置兜底（默认空 = 必须用户配置）。
-const ASSRT_TOKEN = ''
+// assrt 官方发放的「播放器专用 token」，授权用于本软件测试 + 发布（额度已提升）→ 内置作默认兜底，开箱即用。
+// 用户仍可在设置里填自己的 token 覆盖（免费注册；额度按 token+IP 共享）。
+// 参考 assrt 官方 mpv 插件同款用法：https://github.com/AssrtOSS/mpv-assrt/blob/master/scripts/assrt.lua
+const ASSRT_TOKEN = 'tNjXZUnOJWcHznHDyalNMYqqP6IdDdpQ'
 const API_BASE = 'https://api.assrt.net/v1'
 
-/** 生效的 token：设置里填的优先，否则用内置兜底（默认空） */
+/** 生效的 token：设置里填的优先，否则用内置的播放器专用 token */
 function token(): string {
   return (useSettings().settings.assrtToken || ASSRT_TOKEN).trim()
 }

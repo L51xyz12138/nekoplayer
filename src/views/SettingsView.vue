@@ -232,15 +232,15 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
           </div>
           <div class="row">
             <div class="row__label">
-              <h4>assrt 字幕 Token（在线字幕）</h4>
-              <p>填入后，文件源详情页出现「在线字幕」按钮，可按片名搜索下载字幕（仅 mpv 生效）。字幕服务由 <a href="https://assrt.net" target="_blank" rel="noreferrer">assrt.net</a> 提供；免费注册登录后在用户面板查看 Token（额度 20 次/分）。留空则不启用。</p>
+              <h4>assrt 字幕 Token（在线字幕，可选）</h4>
+              <p>文件源详情页的「在线字幕」按钮可按片名搜索下载字幕（仅 mpv 生效）。已内置官方发放的播放器专用 Token，<strong>留空即可开箱即用</strong>；字幕服务由 <a href="https://assrt.net" target="_blank" rel="noreferrer">assrt.net</a> 提供。如遇公用额度繁忙，可 <a href="https://assrt.net" target="_blank" rel="noreferrer">免费注册</a> 后在用户面板取自己的 Token 填这里（额度 20 次/分，走自己的更稳）。</p>
             </div>
             <div class="secret">
               <input
                 v-model="settings.assrtToken"
                 class="path-input"
                 :type="showAssrtToken ? 'text' : 'password'"
-                placeholder="assrt API Token（留空不启用）"
+                placeholder="assrt API Token（留空用内置默认）"
                 spellcheck="false"
                 autocomplete="off"
               />
