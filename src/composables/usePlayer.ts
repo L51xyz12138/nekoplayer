@@ -149,7 +149,8 @@ async function playWith(item: MediaItem, episode: Episode | undefined, player: s
         const ep = queue[i]
         return { url: r.url, title: ep ? `${ep.episode}. ${ep.title}` : label }
       })
-      const psid = infos[startAt].playSessionId || `neko${Date.now()}`
+      // 客户端自己生成会话 id：Start(此处) 与 Progress/Stopped(主进程) 必须用同一个，Emby 才认进度
+      const psid = `neko${Date.now()}`
       const playItemId = queue.length ? queue[startAt].id : targetId
       if (player === 'mpv') {
         // Trakt scrobble：用起播条目的 ProviderIds（tmdb/imdb）匹配

@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('nekoNative', {
   // 下载在线字幕（assrt 直链）到本地，返回可播绝对路径
   downloadSub: (url, name) => ipcRenderer.invoke('download-sub', { url, name }),
   checkMpv: (mpvPath) => ipcRenderer.invoke('check-mpv', mpvPath),
+  // 缓存占用统计 / 清理（缩略图 + 下载的字幕）
+  cacheUsage: () => ipcRenderer.invoke('cache-usage'),
+  clearCache: (what) => ipcRenderer.invoke('clear-cache', what),
   // 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小）
   probeMedia: (file, mpvPath) => ipcRenderer.invoke('probe-media', { file, mpvPath }),
   // 亮/暗切换时同步标题栏悬浮按钮区配色（Windows）

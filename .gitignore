@@ -17,6 +17,7 @@ buildResources/icon.png
 
 # 项目 AI 迭代指南（供本地 AI 阅览，勿上传）
 CLAUDE.md
+AGENTS.md
 
 # 日志
 *.log

@@ -40,6 +40,7 @@ const {
   probeFileEpisode,
   loadEmbyTracks,
   loadEmbyEpisode,
+  loadEmbyDetail,
   loadEpisodeNames
 } = useLibrary()
 const player = usePlayer()
@@ -189,6 +190,8 @@ watch(
       epFocused.value = false
     }
     if (!it) return
+    // Emby/Jellyfin：演职人员/完整简介不在整库列表请求里（体积太大），进详情页才按需补
+    void loadEmbyDetail(it)
     if (it.type === 'series') {
       // 文件源剧集季集聚合时已建（id 前缀 local-series:），Emby 剧集需懒加载
       if (!it.seasons && !it.id.startsWith('local-series:')) loadSeasons(it.id)

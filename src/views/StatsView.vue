@@ -5,14 +5,24 @@ import { useLibrary } from '@/composables/useLibrary'
 import { useTrakt } from '@/composables/useTrakt'
 import type { TraktStats } from '@/api/trakt'
 
-const { items } = useLibrary()
+const { items, loadCastFor } = useLibrary()
 const trakt = useTrakt()
 
 const stats = ref<TraktStats | null>(null)
 const watchDates = ref<string[]>([])
 const loading = ref(false)
+// 「常看演员」补数据中：演职人员不随整库预载（体积太大），这里按需拉已看条目的
+const castLoading = ref(false)
 
 onMounted(async () => {
+  // 演员统计要 cast，而整库列表不带 People → 给已看条目按需补（限量 120、限并发 6）
+  const need = watched.value.filter((m) => !m.cast.length)
+  if (need.length) {
+    castLoading.value = true
+    void loadCastFor(need).finally(() => {
+      castLoading.value = false
+    })
+  }
   if (!trakt.connected.value) return
   loading.value = true
   try {
@@ -195,8 +205,10 @@ const hasAnything = computed(
       </div>
 
       <!-- 常看演员 -->
-      <section v-if="topActors.length" class="panel">
-        <h2 class="panel__title">常看演员<span class="panel__sub">库内已看</span></h2>
+      <section v-if="topActors.length || castLoading" class="panel">
+        <h2 class="panel__title">
+          常看演员<span class="panel__sub">{{ castLoading ? '统计中…' : '库内已看' }}</span>
+        </h2>
         <div class="actors">
           <div v-for="a in topActors" :key="a.name" class="actor">
             <div class="actor__ava">

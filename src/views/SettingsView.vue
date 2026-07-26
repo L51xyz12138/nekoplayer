@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Check, Palette, Film, Captions, Info, Clapperboard, Github, Tv, Eye, EyeOff } from 'lucide-vue-next'
+import { Check, Palette, Film, Captions, Info, Clapperboard, Github, Tv, Eye, EyeOff, HardDrive } from 'lucide-vue-next'
 import Segmented from '@/components/common/Segmented.vue'
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { useSettings } from '@/composables/useSettings'
+import { useLibrary } from '@/composables/useLibrary'
+import { useToast } from '@/composables/useToast'
 import { useTrakt } from '@/composables/useTrakt'
 import { useUpdate } from '@/composables/useUpdate'
 import iconUrl from '@/assets/icon.svg'
 
 const appVersion = __APP_VERSION__
 const { settings, themes } = useSettings()
+const { clearDownloadedSubs } = useLibrary()
+const { toast } = useToast()
 const trakt = useTrakt()
 const update = useUpdate()
 const subColors = ['#ffffff', '#ffce53', '#7fe7ff', '#a0ff9d']
@@ -66,6 +70,51 @@ async function refreshMpvStatus() {
 }
 onMounted(refreshMpvStatus)
 watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
+
+// ---- 存储：缩略图 / 已下载字幕的占用与清理（两者都会随使用无限增长） ----
+type CacheUsage = { thumbs: { count: number; bytes: number }; subs: { count: number; bytes: number } }
+const usage = ref<CacheUsage | null>(null)
+const clearing = ref(false)
+function fmtSize(n: number): string {
+  if (!n) return '0 B'
+  const u = ['B', 'KB', 'MB', 'GB']
+  let v = n
+  let i = 0
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
+}
+async function refreshUsage() {
+  try {
+    usage.value = (await window.nekoNative?.cacheUsage?.()) ?? null
+  } catch {
+    usage.value = null
+  }
+}
+onMounted(refreshUsage)
+async function clearThumbs() {
+  clearing.value = true
+  try {
+    const r = await window.nekoNative?.clearCache?.({ thumbs: true })
+    toast(`已清理 ${r?.thumbs ?? 0} 张缩略图`, 'info')
+    await refreshUsage()
+  } finally {
+    clearing.value = false
+  }
+}
+async function clearSubs() {
+  clearing.value = true
+  try {
+    const r = await window.nekoNative?.clearCache?.({ subs: true })
+    clearDownloadedSubs() // 同步清掉挂载记录，否则会留下指向已删文件的字幕
+    toast(`已清理 ${r?.subs ?? 0} 个字幕文件`, 'info')
+    await refreshUsage()
+  } finally {
+    clearing.value = false
+  }
+}
 </script>
 
 <template>
@@ -139,10 +188,7 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
               </p>
             </div>
           </div>
-          <div class="row">
-            <div class="row__label"><h4>默认画质</h4><p>网络良好时优先使用的清晰度</p></div>
-            <Segmented v-model="settings.quality" :options="['自动', '4K', '1080P', '720P', '480P']" />
-          </div>
+          <!-- 「默认画质」已移除：一律直连原始文件、不转码，本就没有清晰度可选（此前该项从未被读取） -->
           <div class="row">
             <div class="row__label"><h4>默认倍速</h4><p>开始播放时的默认速度</p></div>
             <Segmented v-model="settings.rate" :options="[0.75, 1, 1.25, 1.5, 2]" />
@@ -298,6 +344,31 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
             </div>
             <button class="trakt-btn" :disabled="!trakt.configured.value" @click="trakt.connect">
               {{ trakt.configured.value ? '连接 Trakt' : '未配置凭据' }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 存储 -->
+      <section class="group">
+        <h2 class="group__title"><HardDrive :size="17" /> 存储</h2>
+        <div class="card">
+          <div class="row">
+            <div class="row__label">
+              <h4>视频缩略图缓存<span v-if="usage"> · {{ usage.thumbs.count }} 张 / {{ fmtSize(usage.thumbs.bytes) }}</span></h4>
+              <p>文件源没有海报时用 mpv 抽帧生成的封面，删掉后下次浏览会自动重新生成。</p>
+            </div>
+            <button class="cache-btn" :disabled="clearing || !usage?.thumbs.count" @click="clearThumbs">
+              {{ clearing ? '清理中…' : '清理' }}
+            </button>
+          </div>
+          <div class="row">
+            <div class="row__label">
+              <h4>已下载字幕<span v-if="usage"> · {{ usage.subs.count }} 个 / {{ fmtSize(usage.subs.bytes) }}</span></h4>
+              <p>「在线字幕」下载到本地的字幕文件。清理会同时移除各条目上挂载的这些字幕（扫描到的同名字幕不受影响）。</p>
+            </div>
+            <button class="cache-btn" :disabled="clearing || !usage?.subs.count" @click="clearSubs">
+              {{ clearing ? '清理中…' : '清理' }}
             </button>
           </div>
         </div>
@@ -605,6 +676,30 @@ watch(() => [settings.playerMode, settings.playerPaths.mpv], refreshMpvStatus)
 }
 
 /* Trakt 连接 */
+/* 存储：清理按钮（次要操作，用描边而非强调色实心，避免像主行动按钮） */
+.cache-btn {
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.cache-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.cache-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .trakt-btn {
   flex-shrink: 0;
   height: 40px;

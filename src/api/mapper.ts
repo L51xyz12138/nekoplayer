@@ -1,4 +1,4 @@
-import type { Episode, MediaItem, MediaTech, NextUpEpisode, Person, Season } from '@/types/media'
+import type { Episode, MediaItem, NextUpEpisode, Person, Season } from '@/types/media'
 import { imageUrl, type EmbyItem, type EmbyPerson, type EmbySession } from './emby'
 
 const TICKS_PER_MINUTE = 600_000_000 // 1 分钟 = 6e8 个 100ns tick
@@ -23,50 +23,9 @@ function mapPeople(people: EmbyPerson[] | undefined, serverUrl: string): Person[
   }))
 }
 
-function qualityLabel(height?: number): string {
-  if (!height) return 'SD'
-  if (height >= 2000) return '4K'
-  if (height >= 1000) return '1080P'
-  if (height >= 700) return '720P'
-  return '480P'
-}
-
-function formatSize(bytes?: number): string {
-  if (!bytes) return '—'
-  const gb = bytes / 1024 ** 3
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`
-}
-
-function mapTech(item: EmbyItem): MediaTech | undefined {
-  const source = item.MediaSources?.[0]
-  const streams = source?.MediaStreams ?? item.MediaStreams
-  if (!streams?.length) return undefined
-
-  const video = streams.find((s) => s.Type === 'Video')
-  const audios = streams.filter((s) => s.Type === 'Audio')
-  const quality = qualityLabel(video?.Height)
-  const range = video?.DisplayTitle?.includes('Dolby Vision')
-    ? 'Dolby Vision'
-    : video?.DisplayTitle?.includes('HDR')
-      ? 'HDR'
-      : 'SDR'
-
-  return {
-    resolution: video?.Width && video?.Height ? `${video.Width} × ${video.Height}` : '未知',
-    quality,
-    dynamicRange: range,
-    videoCodec: video?.Codec?.toUpperCase() ?? '未知',
-    audioCodec: audios[0]?.DisplayTitle ?? audios[0]?.Codec?.toUpperCase() ?? '未知',
-    fileSize: formatSize(source?.Size),
-    bitrate: source?.Bitrate ? `${Math.round(source.Bitrate / 1_000_000)} Mbps` : '—',
-    container: source?.Container?.toUpperCase() ?? '未知',
-    filePath: source?.Path ?? '',
-    resolutions: [quality],
-    audioTracks: audios.map((a) => a.DisplayTitle || a.Language || a.Codec || '音轨').slice(0, 6)
-  }
-}
-
-/** 把 Emby Item 映射为应用内部的 MediaItem */
+/** 把 Emby Item 映射为应用内部的 MediaItem。
+ * `tech`（视频格式）不在这里组装——列表请求不再带 MediaSources/MediaStreams（整库拉取时体积极大），
+ * 改由详情页的 `useLibrary.loadEmbyTracks` → `getMediaInfo` 按需拉（还带 mpv 探测兜底，比列表里的更准）。 */
 export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
   const type: MediaItem['type'] =
     item.Type === 'Series' ? 'series' : item.Type === 'BoxSet' ? 'collection' : 'movie'
@@ -98,7 +57,6 @@ export function mapEmbyItem(item: EmbyItem, session: EmbySession): MediaItem {
     positionTicks: item.UserData?.PlaybackPositionTicks || undefined,
     addedAt: item.DateCreated ? Date.parse(item.DateCreated) : Date.now(),
     lastPlayed: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) : undefined,
-    tech: mapTech(item),
     posterUrl: imageUrl(session.serverUrl, item.Id, 'Primary', primaryTag, 600),
     // 背景图铺满详情页 hero，1280 在大屏会被拉糊 → 要更高分辨率
     backdropUrl: imageUrl(session.serverUrl, item.Id, 'Backdrop', backdropTag, 1920)

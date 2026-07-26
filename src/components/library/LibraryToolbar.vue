@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
 import {
   Layers,
   Server,
@@ -71,6 +71,29 @@ const sorts: { key: SortMode; label: string }[] = [
   { key: 'rating', label: '评分' },
   { key: 'year', label: '年份' }
 ]
+
+// 搜索防抖：query 一变就要对全库重跑 filter + sort（实测 27k 条目、按名称排序时约 80ms/次），
+// 逐键触发会明显卡输入。输入框走本地 ref 保持即时回显，160ms 后才落到 store。
+const SEARCH_DEBOUNCE = 160
+const draftQuery = ref(query.value)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+function onSearchInput(v: string) {
+  draftQuery.value = v
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => setQuery(v), SEARCH_DEBOUNCE)
+}
+function clearSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  draftQuery.value = ''
+  setQuery('') // 点×立即生效，不等防抖
+}
+// 外部改了 query（如切源重置）时同步回输入框
+watch(query, (v) => {
+  if (v !== draftQuery.value) draftQuery.value = v
+})
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
 
 // 同时只开一个下拉；点遮罩或选中后关闭
 const openMenu = ref<'' | 'src' | 'lib' | 'sort'>('')
@@ -176,13 +199,13 @@ function pickSort(mode: SortMode) {
     <label class="ltoolbar__search">
       <Search :size="15" class="ltoolbar__search-icon" />
       <input
-        :value="query"
+        :value="draftQuery"
         type="text"
         placeholder="搜索影片、剧集…（按 / 聚焦）"
         data-search-input
-        @input="setQuery(($event.target as HTMLInputElement).value)"
+        @input="onSearchInput(($event.target as HTMLInputElement).value)"
       />
-      <button v-if="query" type="button" class="ltoolbar__search-clear" title="清除" @click="setQuery('')">
+      <button v-if="draftQuery" type="button" class="ltoolbar__search-clear" title="清除" @click="clearSearch">
         <X :size="14" />
       </button>
     </label>

@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { spawn, execSync } from 'node:child_process'
 import net from 'node:net'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
+import { readdir, readFile, rm, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir, networkInterfaces } from 'node:os'
 import path from 'node:path'
@@ -432,6 +432,7 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     args.push('--sub-visibility=yes')
 
   let target
+  let tempPlaylist = '' // 生成的临时播放列表，mpv 退出后删掉（否则每次连播都在 tmp 里留一个文件）
   if (list.length === 1) {
     target = list[0].url
     if (list[0].title) args.push(`--force-media-title=${list[0].title}`)
@@ -445,6 +446,7 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     const m3uPath = path.join(tmpdir(), `nekoplayer-${Date.now()}.m3u8`)
     writeFileSync(m3uPath, lines.join('\n'), 'utf-8')
     target = m3uPath
+    tempPlaylist = m3uPath
     // 从当前集开始播放（前面的集仍在列表里可往前跳）
     if (typeof startIndex === 'number' && startIndex > 0) {
       args.push(`--playlist-start=${startIndex}`)
@@ -452,6 +454,15 @@ ipcMain.handle('play-mpv', (_e, payload) => {
   }
 
   const mpv = resolveMpv(mpvPath)
+  const dropPlaylist = () => {
+    if (!tempPlaylist) return
+    try {
+      rmSync(tempPlaylist, { force: true })
+    } catch {
+      /* ignore */
+    }
+    tempPlaylist = ''
+  }
   try {
     const proc = spawn(mpv, [target, ...args], { stdio: 'ignore', detached: true })
     proc.unref()
@@ -460,9 +471,11 @@ ipcMain.handle('play-mpv', (_e, payload) => {
     proc.on('error', (err) => {
       console.error('[mpv] 启动失败：', err.message)
       if (mpvProc === proc) mpvProc = null
+      dropPlaylist()
     })
     proc.on('exit', () => {
       if (mpvProc === proc) mpvProc = null
+      dropPlaylist()
     })
     if (emby || tracks || scrobble || fileKey) {
       // emby → 进度回传；tracks → 强制预选轨道；scrobble → Trakt 打点；fileKey → 文件源本地进度回传
@@ -472,6 +485,7 @@ ipcMain.handle('play-mpv', (_e, payload) => {
   } catch (err) {
     console.error('[mpv] spawn 异常：', err)
     mpvProc = null
+    dropPlaylist()
     return false
   }
 })
@@ -1292,6 +1306,53 @@ ipcMain.handle('check-mpv', (_e, mpvPath) => {
   const resolved = resolveMpv(mpvPath || settingsMpvPath())
   const ok = existsSync(resolved)
   return { ok, path: ok ? resolved : '' }
+})
+
+// ---------- 缓存占用统计 / 清理（缩略图、下载的字幕；两者都会随使用无限增长）----------
+async function dirUsage(dir) {
+  try {
+    const names = await readdir(dir)
+    let bytes = 0
+    for (const n of names) {
+      try {
+        bytes += (await stat(path.join(dir, n))).size
+      } catch {
+        /* 文件正被删/无权限：跳过 */
+      }
+    }
+    return { count: names.length, bytes }
+  } catch {
+    return { count: 0, bytes: 0 }
+  }
+}
+ipcMain.handle('cache-usage', async () => {
+  const [thumbs, subs] = await Promise.all([dirUsage(THUMB_DIR), dirUsage(SUBS_DIR)])
+  return { thumbs, subs }
+})
+async function clearDir(dir) {
+  let removed = 0
+  try {
+    for (const n of await readdir(dir)) {
+      try {
+        await rm(path.join(dir, n), { force: true })
+        removed++
+      } catch {
+        /* 正被占用（如 mpv 正挂着这条字幕）：跳过 */
+      }
+    }
+  } catch {
+    /* 目录不存在：无事可做 */
+  }
+  return removed
+}
+// 清理缓存。thumbs 完全可再生（下次浏览自动重抽）；subs 是下载的字幕文件，
+// 渲染进程清完要一并清掉 neko-manual-subs/neko-sub-labels，否则会留下指向已删文件的记录
+ipcMain.handle('clear-cache', async (_e, payload) => {
+  const { thumbs, subs } = payload || {}
+  const out = { thumbs: 0, subs: 0 }
+  if (thumbs) out.thumbs = await clearDir(THUMB_DIR)
+  if (subs) out.subs = await clearDir(SUBS_DIR)
+  return out
 })
 
 // 从 mpv 输出解析音轨/字幕轨道列表（● 选中 / ○ 未选）

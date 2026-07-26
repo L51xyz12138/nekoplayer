@@ -99,6 +99,13 @@ export interface NekoNative {
   downloadSub(url: string, name?: string): Promise<{ path?: string; error?: string }>
   /** 检查 mpv 是否可用（传入自定义路径优先）；ok=false 表示需用户填路径 */
   checkMpv(mpvPath?: string): Promise<{ ok: boolean; path: string }>
+  /** 缩略图 / 下载字幕的缓存占用（文件数 + 字节数） */
+  cacheUsage(): Promise<{
+    thumbs: { count: number; bytes: number }
+    subs: { count: number; bytes: number }
+  }>
+  /** 清理缓存，返回各自删掉的文件数。清 subs 后需一并清掉本地的字幕记录 */
+  clearCache(what: { thumbs?: boolean; subs?: boolean }): Promise<{ thumbs: number; subs: number }>
   /** 用 mpv 探测视频媒体信息（分辨率/编码/时长/大小 + 音轨/字幕轨道列表）；失败返回 null */
   probeMedia(
     file: string,

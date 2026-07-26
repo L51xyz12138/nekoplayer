@@ -202,7 +202,10 @@ export async function getViews(session: EmbySession): Promise<EmbyView[]> {
   return (data.Items ?? []) as EmbyView[]
 }
 
-/** 拉取媒体库项目（电影 + 剧集）；传 ParentId 可只拉某个库 */
+/** 拉取媒体库项目（电影 + 剧集）；传 ParentId 可只拉某个库。
+ * ⚠️ Fields 刻意**不带** `People` / `MediaSources` / `MediaStreams`——整库列表里这三项体积极大
+ * （实测 27k 条目库：People→cast 44MB、MediaSources→tech 4.6MB），而列表页一个都用不到：
+ * 演职人员由详情页 `loadEmbyDetail` 按需补，视频格式/轨道由 `getMediaInfo` 按需拉（还带 mpv 探测兜底、更准）。 */
 export async function getItems(
   session: EmbySession,
   params: Record<string, string> = {}
@@ -211,7 +214,7 @@ export async function getItems(
     IncludeItemTypes: 'Movie,Series',
     Recursive: 'true',
     Fields:
-      'Overview,Genres,ProductionYear,CommunityRating,OfficialRating,RunTimeTicks,Taglines,DateCreated,People,MediaSources,MediaStreams,ProviderIds',
+      'Overview,Genres,ProductionYear,CommunityRating,OfficialRating,RunTimeTicks,Taglines,DateCreated,ProviderIds',
     SortBy: 'DateCreated',
     SortOrder: 'Descending',
     ...params
@@ -226,9 +229,18 @@ export async function getCollections(session: EmbySession): Promise<EmbyItem[]> 
   return getItems(session, { IncludeItemTypes: 'BoxSet' })
 }
 
-/** 拉取单个条目详情 */
-export async function getItem(session: EmbySession, itemId: string): Promise<EmbyItem> {
-  const res = await request(session.serverUrl, `/Users/${session.userId}/Items/${itemId}`, session.token)
+/** 拉取单个条目详情；`fields` 可要求列表请求里没带的重字段（如 People 演职人员） */
+export async function getItem(
+  session: EmbySession,
+  itemId: string,
+  fields?: string
+): Promise<EmbyItem> {
+  const q = fields ? `?${new URLSearchParams({ Fields: fields })}` : ''
+  const res = await request(
+    session.serverUrl,
+    `/Users/${session.userId}/Items/${itemId}${q}`,
+    session.token
+  )
   return res.json() as Promise<EmbyItem>
 }
 
@@ -260,11 +272,12 @@ export async function getResume(session: EmbySession, limit = 40): Promise<EmbyI
   return (data.Items ?? []) as EmbyItem[]
 }
 
-/** 拉取剧集的全部分集 */
+/** 拉取剧集的全部分集。同样不带 MediaSources/MediaStreams——长寿剧动辄几百集，
+ * 而 `mapEpisodes` 一个都不读；某一集的格式/轨道由详情页 `loadEmbyEpisode` → `getMediaInfo` 按需拉。 */
 export async function getEpisodes(session: EmbySession, seriesId: string): Promise<EmbyItem[]> {
   const q = new URLSearchParams({
     UserId: session.userId,
-    Fields: 'Overview,RunTimeTicks,MediaSources,MediaStreams,UserData'
+    Fields: 'Overview,RunTimeTicks,UserData'
   })
   const res = await request(session.serverUrl, `/Shows/${seriesId}/Episodes?${q}`, session.token)
   const data = await res.json()
@@ -293,7 +306,6 @@ export async function getMpvPlayback(
   itemId: string
 ): Promise<{
   url: string
-  playSessionId: string
   /** 条目在 TMDB/IMDB 的 id（来自 ProviderIds），供 Trakt scrobble 匹配 */
   ids: { tmdb?: number; imdb?: string }
   /** 'movie' | 'episode' | 'other'（来自 Emby Type） */
@@ -308,7 +320,6 @@ export async function getMpvPlayback(
   )
   const data = await res.json()
   const source = data.MediaSources?.[0] as EmbyPlaybackSource | undefined
-  const playSessionId = ''
   const sourceId: string = source?.Id ?? itemId
 
   // ProviderIds 键名大小写因服务器而异，做个不分大小写的取值
@@ -342,7 +353,7 @@ export async function getMpvPlayback(
     })
     url = `${session.serverUrl}/Videos/${itemId}/stream.${container}?${q}`
   }
-  return { url, playSessionId, ids, type }
+  return { url, ids, type }
 }
 
 /** Emby/Jellyfin 条目的媒体信息（供详情页预选轨道 + 显示视频格式/文件路径） */

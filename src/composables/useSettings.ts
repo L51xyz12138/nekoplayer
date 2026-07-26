@@ -21,7 +21,6 @@ interface Settings {
   colorScheme: string
   playerMode: string
   playerPaths: Record<string, string>
-  quality: string | number
   rate: string | number
   autoNext: boolean
   hwdecode: boolean
@@ -51,7 +50,6 @@ const DEFAULTS: Settings = {
   colorScheme: '跟随系统',
   playerMode: 'mpv',
   playerPaths: {},
-  quality: '自动',
   rate: 1,
   autoNext: true,
   hwdecode: true,

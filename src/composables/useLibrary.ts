@@ -33,6 +33,7 @@ import {
 } from '@/api/tmdb'
 import { useSources } from './useSources'
 import { useSettings } from './useSettings'
+import { useToast } from './useToast'
 import { useTrakt } from './useTrakt'
 import type { TraktTab } from '@/api/trakt'
 import { pget, pset } from './persist'
@@ -46,20 +47,71 @@ const CACHE_KEY = 'neko-library-cache'
 function loadCache(): MediaItem[] {
   try {
     const raw = pget(CACHE_KEY)
-    return raw ? (JSON.parse(raw) as MediaItem[]) : []
+    const list = raw ? (JSON.parse(raw) as MediaItem[]) : []
+    // 缓存不存 cast（见 slimForCache）；读回来补空数组，模板里的 item.cast.length 才安全
+    for (const m of list) if (!m.cast) m.cast = []
+    return list
   } catch {
     return []
   }
 }
 
+// 缓存里简介的最大长度：Hero 横幅只显示两三行，存全文没意义（实测 27k 条目库里简介合计 5.4MB）
+const CACHE_OVERVIEW_MAX = 300
+
+/** 缓存瘦身：只留「首屏渲染 + 派生数据」真正用到的字段。
+ * ⚠️ 缓存只是启动那一两秒的占位（SWR），随后 `loadFromEmby` 会用完整数据整体替换，故重字段不必进缓存：
+ * - `cast`（演职人员）详情页 `loadEmbyDetail` 按需拉；
+ * - `tech`（视频格式）详情页 `getMediaInfo`/mpv 探测按需拉，且会整个覆盖；
+ * - `overview` 截断到 300 字（Hero 显示不下更多）。
+ * 实测 27151 条目的库：70.0MB → 20.0MB，解析 156ms→50ms、序列化 187ms→61ms
+ * （解析发生在启动、且 storeGet 走同步 IPC，故直接减的是启动阻塞时间）。 */
+function slimForCache(m: MediaItem): Omit<MediaItem, 'cast'> {
+  return {
+    id: m.id,
+    sourceId: m.sourceId,
+    libraryId: m.libraryId,
+    libraryName: m.libraryName,
+    title: m.title,
+    type: m.type,
+    year: m.year,
+    runtime: m.runtime,
+    rating: m.rating,
+    certification: m.certification,
+    genres: m.genres,
+    overview:
+      m.overview.length > CACHE_OVERVIEW_MAX ? m.overview.slice(0, CACHE_OVERVIEW_MAX) : m.overview,
+    addedAt: m.addedAt,
+    posterUrl: m.posterUrl,
+    backdropUrl: m.backdropUrl,
+    favorite: m.favorite,
+    watched: m.watched,
+    progress: m.progress,
+    positionTicks: m.positionTicks,
+    lastPlayed: m.lastPlayed,
+    nextUp: m.nextUp,
+    localPath: m.localPath,
+    folder: m.folder,
+    subtitles: m.subtitles,
+    seasons: m.seasons,
+    tmdbId: m.tmdbId,
+    tmdbCollectionId: m.tmdbCollectionId,
+    tmdbCollectionName: m.tmdbCollectionName,
+    collectionId: m.collectionId,
+    scraped: m.scraped
+  }
+}
+
+// 去抖 2s：缓存只是「下次启动的首屏快照」，不需要实时落盘。
+// 大库一次序列化 + 写盘不便宜（瘦身后仍约 20MB），去抖能把「连点几个收藏/已看」合并成一次写。
+const CACHE_DEBOUNCE = 2000
 let cacheTimer: ReturnType<typeof setTimeout> | undefined
 function saveCache(items: MediaItem[]) {
-  // 大库 JSON.stringify 较重：去抖 + 延后到空闲，避免阻塞加载后的首屏交互
   if (cacheTimer) clearTimeout(cacheTimer)
   cacheTimer = setTimeout(() => {
     cacheTimer = undefined
-    pset(CACHE_KEY, JSON.stringify(items))
-  }, 500)
+    pset(CACHE_KEY, JSON.stringify(items.map(slimForCache)))
+  }, CACHE_DEBOUNCE)
 }
 
 interface LibraryState {
@@ -303,24 +355,31 @@ function getById(id: string) {
   return state.items.find((m) => m.id === id)
 }
 
+/** 收藏 / 取消收藏（乐观更新 + 回写服务器；失败回滚并提示，否则界面会显示成功但服务器没存上） */
 function toggleFavorite(id: string) {
   const m = getById(id)
   if (!m) return
-  m.favorite = !m.favorite
+  const prev = m.favorite
+  m.favorite = !prev
   const s = useSources().sessionOf(m.sourceId)
   if (s) {
-    setFavorite(s, id, m.favorite).catch((e) =>
+    setFavorite(s, id, m.favorite).catch((e) => {
       console.warn('[NekoPlayer] 收藏同步失败：', e)
-    )
+      m.favorite = prev
+      saveCache(state.items)
+      useToast().toast('收藏同步到服务器失败，已还原', 'error')
+    })
   }
   saveCache(state.items)
 }
 
-/** 标记已看 / 取消已看（乐观更新 + 回写服务器） */
+/** 标记已看 / 取消已看（乐观更新 + 回写服务器；失败回滚并提示） */
 function toggleWatched(id: string) {
   const m = getById(id)
   if (!m) return
-  m.watched = !m.watched
+  // 回滚要连进度/续看点一起还原（标已看会清掉它们）
+  const prev = { watched: m.watched, progress: m.progress, nextUp: m.nextUp }
+  m.watched = !prev.watched
   // 标记已看：清掉进度与下一集待看，使其移出「继续观看」
   if (m.watched) {
     m.progress = undefined
@@ -328,9 +387,12 @@ function toggleWatched(id: string) {
   }
   const s = useSources().sessionOf(m.sourceId)
   if (s) {
-    setPlayed(s, id, m.watched).catch((e) =>
+    setPlayed(s, id, m.watched).catch((e) => {
       console.warn('[NekoPlayer] 已看状态同步失败：', e)
-    )
+      Object.assign(m, prev)
+      saveCache(state.items)
+      useToast().toast('已看状态同步到服务器失败，已还原', 'error')
+    })
   }
   saveCache(state.items)
 }
@@ -587,6 +649,26 @@ function removeManualSub(fileId: string, subPath: string) {
           ep.subtitles = ep.subtitles.filter((x) => x !== subPath)
           return
         }
+}
+
+/** 清空所有「下载到本地的字幕」记录（配合设置页清理 userData/subs 里的字幕文件）。
+ * 只摘掉下载来的那些路径，扫描到的同名字幕（WebDAV/DLNA 直链）不受影响。返回清掉的条数。 */
+function clearDownloadedSubs(): number {
+  const gone = new Set(Object.values(manualSubs).flat())
+  if (!gone.size) return 0
+  for (const k of Object.keys(manualSubs)) delete manualSubs[k]
+  for (const k of Object.keys(subLabels)) delete subLabels[k]
+  pset(MANUAL_SUBS_KEY, JSON.stringify(manualSubs))
+  pset(SUB_LABELS_KEY, JSON.stringify(subLabels))
+  for (const m of state.items) {
+    if (m.subtitles?.some((s) => gone.has(s)))
+      m.subtitles = m.subtitles.filter((s) => !gone.has(s))
+    for (const se of m.seasons ?? [])
+      for (const ep of se.episodes)
+        if (ep.subtitles?.some((s) => gone.has(s)))
+          ep.subtitles = ep.subtitles.filter((s) => !gone.has(s))
+  }
+  return gone.size
 }
 
 // ---- 文件源本地进度（续播 + 继续观看）：文件源无服务器进度，用 mpv 回传的位置按文件路径本地记 ----
@@ -1019,6 +1101,62 @@ async function loadEmbyTracks(item: MediaItem) {
 async function loadEmbyEpisode(ep: Episode, sourceId: string) {
   const s = useSources().sessionOf(sourceId)
   if (s) await loadEmbyInfo(ep, s, ep.id)
+}
+
+// 已拉到的详情重字段（内存缓存，按条目 id）。
+// ⚠️ 必须缓存「数据」而不是只记「拉过了」：loadFromEmby 刷新会用不含 cast 的新对象替换 items，
+// 只记标记的话，替换后再进详情页就会被标记挡住、cast 永远补不回来。
+const detailCache: Record<string, Pick<MediaItem, 'cast' | 'overview' | 'tagline'>> = {}
+const detailInflight = new Set<string>()
+function applyDetail(item: MediaItem, d: Pick<MediaItem, 'cast' | 'overview' | 'tagline'>) {
+  if (d.cast.length) item.cast = d.cast
+  if (d.overview) item.overview = d.overview // 缓存里的简介被截断过，顺带补全
+  if (d.tagline) item.tagline = d.tagline
+}
+/** 按需补 Emby/Jellyfin 条目的「重字段」：演职人员 + 完整简介/标语。
+ * 整库列表请求刻意不带 People（27k 条目库实测 44MB），故详情页打开时才拉这一条的。
+ * 文件源条目由 TMDB 刮削直接给 cast，不走这里。 */
+async function loadEmbyDetail(item: MediaItem) {
+  if (item.cast.length || isFileItem(item)) return
+  const hit = detailCache[item.id]
+  if (hit) {
+    applyDetail(item, hit)
+    return
+  }
+  if (detailInflight.has(item.id)) return // 已在拉了（如详情页与统计页同时要）
+  const s = useSources().sessionOf(item.sourceId)
+  if (!s) return
+  detailInflight.add(item.id)
+  try {
+    const d = await getItem(s, item.id, 'Overview,Genres,People,Taglines')
+    const full = mapEmbyItem(d, s)
+    const picked = { cast: full.cast, overview: full.overview, tagline: full.tagline }
+    detailCache[item.id] = picked
+    applyDetail(item, picked)
+  } catch (e) {
+    console.warn('[NekoPlayer] 拉取演职人员失败：', e) // 不缓存失败 → 下次进详情页会重试
+  } finally {
+    detailInflight.delete(item.id)
+  }
+}
+
+/** 批量补演职人员（统计页「常看演员」用）：限量 + 限并发，避免大库一次打出上百个请求。
+ * 返回补到 cast 的条数。 */
+async function loadCastFor(items: MediaItem[], cap = 120): Promise<number> {
+  const targets = items.filter((m) => !m.cast.length && !isFileItem(m))
+  if (!targets.length) return 0
+  const limit = Math.min(targets.length, cap)
+  let idx = 0
+  let done = 0
+  const worker = async () => {
+    while (idx < limit) {
+      const m = targets[idx++]
+      await loadEmbyDetail(m)
+      if (m.cast.length) done++
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, worker))
+  return done
 }
 
 // 把外部拉到的条目并入库（按 id 去重），使详情页 getById 能找到、可导航
@@ -1860,11 +1998,14 @@ export function useLibrary() {
     disbandToMovies,
     addManualSub,
     removeManualSub,
+    clearDownloadedSubs,
     subLabel,
     probeFileTech,
     probeFileEpisode,
     loadEmbyTracks,
     loadEmbyEpisode,
+    loadEmbyDetail,
+    loadCastFor,
     loadPersonWorks,
     loadTraktItems,
     mergeItems
